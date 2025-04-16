@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         self.select_button.clicked.connect(self.select_project_directory)
         self.select_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50; /* Green */
+                background-color: #625e5d ; /* Darker button color */
                 color: white;
                 padding: 10px 20px;
                 border: none;
@@ -31,7 +31,7 @@ class MainWindow(QMainWindow):
                 font-size: 16px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #919898; /* Lighter button color on hover */
             }
         """)
         self.layout.addWidget(self.select_button)
