@@ -3,8 +3,8 @@ import os
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QFileDialog, QLabel, QVBoxLayout, QWidget, QListWidget
 from PyQt6.QtCore import Qt
 import qdarkstyle
-from src.core.dependency_finder import find_dependency_files
-from src.utils.path_utils import get_python_interpreter_path
+from .core.dependency_finder import find_dependency_files
+from .utils.path_utils import get_python_interpreter_path
 
 
 class MainWindow(QMainWindow):
