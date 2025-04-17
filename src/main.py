@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.project_directory = None
         self.python_interpreter_path = get_python_interpreter_path()
 
-        print(f"LibFix is running with: {self.python_interpreter_path}")
+        print(f"LibFix is running with: {self.python_interpreter_path}") 
 
     def select_project_directory(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Python Project Directory")
@@ -67,7 +67,6 @@ class MainWindow(QMainWindow):
             self.project_label.setText(f"Selected Project: {self.project_directory}")
             print(f"Selected project directory: {self.project_directory}")
             self.find_and_display_dependencies()
-
     def find_and_display_dependencies(self):
         if self.project_directory:
             self.dependency_list_widget.clear() # Clear previous results
