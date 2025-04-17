@@ -21,6 +21,7 @@ import qdarkstyle
 # Import functions from local modules within the project
 from .core.dependency_finder import find_dependency_files # Function to find dependency files in a project
 from .utils.path_utils import get_python_interpreter_path # Function to get the path of the current Python interpreter
+from .core.dependency_parser import parse_requirements_txt, parse_setup_py, parse_pyproject_toml
 
 
 # Define the main window class, inheriting from QMainWindow
@@ -107,6 +108,8 @@ class MainWindow(QMainWindow):
         self.project_directory = None
         # Get the path of the Python interpreter currently running this script
         self.python_interpreter_path = get_python_interpreter_path()
+        # Initialize a dictionary to store the paths of found dependency files
+        self.dependency_files = {}
 
         # Print the path of the Python interpreter being used to the console for debugging/info
         print(f"LibFix is running with: {self.python_interpreter_path}")
@@ -134,27 +137,47 @@ class MainWindow(QMainWindow):
     def find_and_display_dependencies(self):
         """
         Finds dependency files (like requirements.txt, pyproject.toml) in the selected
-        project directory and displays them in the list widget.
+        project directory and displays them in the list widget, then parses and displays the dependencies.
         """
         # Check if a project directory has been selected
         if self.project_directory:
             # Clear any items currently displayed in the list widget
             self.dependency_list_widget.clear()
             # Call the imported function to find dependency files in the selected directory
-            found_files = find_dependency_files(self.project_directory)
+            self.dependency_files = find_dependency_files(self.project_directory)
+            all_dependencies = []
 
-            # Check if any dependency files were found at all
-            if not any(found_files.values()):
-                # If no files were found in any category, display a message
+            # Iterate through the dictionary of found files (key=file_type, value=list_of_paths)
+            for file_type, files in self.dependency_files.items():
+                # Iterate through the list of file paths for the current file type
+                for file_path in files:
+                    # Add an item to the list widget, formatting it with the type and filename
+                    # os.path.basename extracts the filename from the full path
+                    self.dependency_list_widget.addItem(f"[{file_type.capitalize()}] {os.path.basename(file_path)}")
+                    # Parse the dependencies based on the file type
+                    if file_type == 'requirements':
+                        dependencies = parse_requirements_txt(file_path)
+                        all_dependencies.extend(dependencies)
+                    elif file_type == 'setup':
+                        dependencies = parse_setup_py(file_path)
+                        all_dependencies.extend(dependencies)
+                    elif file_type == 'pyproject':
+                        dependencies = parse_pyproject_toml(file_path)
+                        all_dependencies.extend(dependencies)
+
+            # Display the extracted dependencies
+            if all_dependencies:
+                self.dependency_list_widget.addItem("\n--- Dependencies ---")
+                # Add each unique dependency to the list widget, sorted alphabetically
+                for dep in sorted(list(set(all_dependencies))):
+                    self.dependency_list_widget.addItem(f"- {dep}")
+            elif not any(self.dependency_files.values()):
+                # If no dependency files were found, display a message
                 self.dependency_list_widget.addItem("No dependency files found in this project.")
             else:
-                # Iterate through the dictionary of found files (key=file_type, value=list_of_paths)
-                for file_type, files in found_files.items():
-                    # Iterate through the list of file paths for the current file type
-                    for file_path in files:
-                        # Add an item to the list widget, formatting it with the type and filename
-                        # os.path.basename extracts the filename from the full path
-                        self.dependency_list_widget.addItem(f"[{file_type.capitalize()}] {os.path.basename(file_path)}")
+                # If dependency files were found but no dependencies were extracted
+                self.dependency_list_widget.addItem("No dependencies found in the dependency files.")
+
         else:
             # If no project directory has been selected yet, clear the list and show a message
             self.dependency_list_widget.clear()
