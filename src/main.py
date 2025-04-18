@@ -144,15 +144,20 @@ class MainWindow(QMainWindow):
                 latest_version = "N/A"
                 inactivity_status = ""
                 inactivity_reason = ""
+                alternatives_text = ""
+
+                package_name = self.extract_package_name(dep)
 
                 if info and 'info' in info and 'version' in info['info']:
                     latest_version = info['info']['version']
-                    inactive, reason = is_potentially_inactive(info)
+                    inactive, reason, alternatives = is_potentially_inactive(info, package_name)
                     if inactive:
                         inactivity_status = " [INACTIVE?]"
                         inactivity_reason = f" (Reason: {reason})"
+                        if alternatives:
+                            alternatives_text = f" (Alternatives: {', '.join(alternatives)})"
 
-                self.dependency_list_widget.addItem(f"{dep} (Latest: {latest_version}){inactivity_status}{inactivity_reason}")
+                self.dependency_list_widget.addItem(f"{dep} (Latest: {latest_version}){inactivity_status}{inactivity_reason}{alternatives_text}")
         elif self.project_directory and not any(find_dependency_files(self.project_directory).values()):
             self.dependency_list_widget.addItem("No dependency files found in this project.")
         elif self.project_directory:
