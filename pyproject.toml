@@ -1,0 +1,41 @@
+[project]
+name = "libfix"
+version = "0.1.0"
+description = "A Python dependency analyzer and updater tool"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "toml>=0.10.2",
+    "python-dateutil>=2.8.2",
+    "packaging>=23.2",
+]
+
+[project.optional-dependencies]
+gui = [
+    "PyQt6>=6.6.0",
+    "qdarkstyle>=2.8.1",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-qt>=4.2.0",
+    "pytest-mock>=3.12.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+libfix = "src.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

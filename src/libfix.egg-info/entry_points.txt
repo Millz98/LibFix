@@ -1,0 +1,2 @@
+[console_scripts]
+libfix = src.cli:main

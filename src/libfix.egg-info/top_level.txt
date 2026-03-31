@@ -1,0 +1,8 @@
+__init__
+cli
+config
+core
+data
+gui
+main
+utils
