@@ -249,6 +249,209 @@ def generate_audit_report(result: AuditResult) -> str:
     return "\n".join(lines)
 
 
+def remove_unused_dependencies(
+    project_path: str,
+    unused_dependencies: list[str],
+    create_backup: bool = True
+) -> tuple[int, list[str]]:
+    """Remove unused dependencies from project files.
+
+    Args:
+        project_path: Path to the project.
+        unused_dependencies: List of package names to remove.
+        create_backup: Whether to create backup files.
+
+    Returns:
+        Tuple of (files modified count, list of modified files).
+    """
+    import shutil
+    from .dependency_parser import parse_all
+
+    modified_files = []
+
+    for root, _, files in os.walk(project_path):
+        if any(skip in root for skip in ["venv", "__pycache__", ".git"]):
+            continue
+
+        for file in files:
+            if file not in ["requirements.txt", "setup.py", "setup.cfg", "pyproject.toml"]:
+                continue
+
+            file_path = os.path.join(root, file)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                original = content
+
+                for dep in unused_dependencies:
+                    dep_normalized = _normalize_package_name(dep)
+
+                    if file.endswith(".py"):
+                        content = _remove_from_python(content, dep_normalized)
+                    elif file.endswith(".txt"):
+                        content = _remove_from_requirements(content, dep)
+                    elif file.endswith(".cfg"):
+                        content = _remove_from_setup_cfg(content, dep)
+                    elif file.endswith(".toml"):
+                        content = _remove_from_toml(content, dep)
+
+                if content != original:
+                    if create_backup:
+                        shutil.copy2(file_path, f"{file_path}.bak")
+
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+
+                    modified_files.append(file_path)
+                    logger.info(f"Removed unused deps from {file_path}")
+
+            except (OSError, UnicodeDecodeError) as e:
+                logger.error(f"Error updating {file_path}: {e}")
+
+    return len(modified_files), modified_files
+
+
+def _remove_from_python(content: str, package_name: str) -> str:
+    import re
+    lines = content.split("\n")
+    new_lines = []
+    skip_next = False
+
+    for i, line in enumerate(lines):
+        if skip_next:
+            skip_next = False
+            continue
+
+        if re.search(rf"install_requires\s*=\s*\[", line):
+            bracket_line = i
+            bracket_count = 0
+            dep_lines = []
+            started = False
+
+            for j in range(i, min(i + 20, len(lines))):
+                dep_lines.append(lines[j])
+                if "[" in lines[j]:
+                    bracket_count += lines[j].count("[")
+                if "]" in lines[j]:
+                    bracket_count -= lines[j].count("]")
+                if bracket_count <= 0 and started:
+                    break
+                started = True
+
+            dep_block = "\n".join(dep_lines)
+            for dep in [package_name, package_name.replace("_", "-")]:
+                dep_block = re.sub(rf"['\"]?\b{re.escape(dep)}\b[^'\"]*['\"]?\s*,?\s*", "", dep_block)
+                dep_block = re.sub(rf",\s*\n\s*['\"]?\b{re.escape(dep)}\b", "", dep_block)
+
+            new_lines.extend(dep_block.split("\n"))
+            i = j
+        else:
+            new_lines.append(line)
+
+    return "\n".join(new_lines)
+
+
+def _remove_from_requirements(content: str, package_name: str) -> str:
+    import re
+    lines = content.split("\n")
+    new_lines = []
+
+    for line in lines:
+        if line.strip().startswith("#"):
+            new_lines.append(line)
+            continue
+
+        dep_normalized = _normalize_package_name(package_name)
+        line_name = _normalize_package_name(_extract_package_name(line))
+
+        if line_name == dep_normalized or line_name == package_name.replace("_", "-"):
+            continue
+
+        new_lines.append(line)
+
+    return "\n".join(new_lines)
+
+
+def _remove_from_setup_cfg(content: str, package_name: str) -> str:
+    import re
+    dep_normalized = _normalize_package_name(package_name)
+
+    content = re.sub(
+        rf"^\s*{re.escape(package_name)}[^\n]*\n",
+        "",
+        content,
+        flags=re.MULTILINE
+    )
+
+    return content
+
+
+def _remove_from_toml(content: str, package_name: str) -> str:
+    import re
+    dep_normalized = _normalize_package_name(package_name)
+
+    content = re.sub(
+        rf'["\']?\b{re.escape(package_name)}\b[^"\']*["\']?\s*[,\]]',
+        "",
+        content
+    )
+
+    return content
+
+
+def add_missing_dependencies(
+    project_path: str,
+    missing_dependencies: list[str]
+) -> tuple[int, list[str]]:
+    """Add missing dependencies to project files.
+
+    Args:
+        project_path: Path to the project.
+        missing_dependencies: List of package names to add.
+
+    Returns:
+        Tuple of (files modified count, list of modified files).
+    """
+    req_files = []
+    for root, _, files in os.walk(project_path):
+        if any(skip in root for skip in ["venv", "__pycache__", ".git"]):
+            continue
+        for file in files:
+            if file == "requirements.txt":
+                req_files.append(os.path.join(root, file))
+
+    if not req_files:
+        logger.warning("No requirements.txt found")
+        return 0, []
+
+    modified_files = []
+    for req_file in req_files:
+        try:
+            with open(req_file, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            original = content
+
+            for dep in missing_dependencies:
+                dep_normalized = _normalize_package_name(dep)
+                if dep_normalized not in content:
+                    if not content.endswith("\n"):
+                        content += "\n"
+                    content += f"{dep}\n"
+                    logger.info(f"Added {dep} to {req_file}")
+
+            if content != original:
+                with open(req_file, "w", encoding="utf-8") as f:
+                    f.write(content)
+                modified_files.append(req_file)
+
+        except (OSError, UnicodeDecodeError) as e:
+            logger.error(f"Error updating {req_file}: {e}")
+
+    return len(modified_files), modified_files
+
+
 if __name__ == "__main__":
     import sys
     import tempfile

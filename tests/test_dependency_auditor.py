@@ -8,6 +8,8 @@ from src.core.dependency_auditor import (
     _normalize_package_name,
     KNOWN_STANDARD_LIB,
     PACKAGE_ALIASES,
+    remove_unused_dependencies,
+    add_missing_dependencies,
 )
 
 
@@ -121,4 +123,43 @@ class TestDependencyAuditor:
         assert len(result.missing_dependencies) == 0
 
         os.unlink(py_file)
+        os.rmdir(temp_dir)
+
+
+class TestFixDependencies:
+    def test_remove_unused_from_requirements(self):
+        temp_dir = tempfile.mkdtemp()
+        req_file = os.path.join(temp_dir, "requirements.txt")
+
+        with open(req_file, "w") as f:
+            f.write("requests\nflask\nunused-pkg\n")
+
+        count, files = remove_unused_dependencies(temp_dir, ["unused-pkg"])
+
+        assert count == 1
+        with open(req_file, "r") as f:
+            content = f.read()
+        assert "unused-pkg" not in content
+        assert "requests" in content
+
+        os.unlink(req_file)
+        os.unlink(f"{req_file}.bak")
+        os.rmdir(temp_dir)
+
+    def test_add_missing_to_requirements(self):
+        temp_dir = tempfile.mkdtemp()
+        req_file = os.path.join(temp_dir, "requirements.txt")
+
+        with open(req_file, "w") as f:
+            f.write("requests\n")
+
+        count, files = add_missing_dependencies(temp_dir, ["flask", "numpy"])
+
+        assert count == 1
+        with open(req_file, "r") as f:
+            content = f.read()
+        assert "flask" in content
+        assert "numpy" in content
+
+        os.unlink(req_file)
         os.rmdir(temp_dir)

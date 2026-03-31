@@ -107,6 +107,7 @@ class AuditDialog(QDialog):
         super().__init__(parent)
         self.project_path = project_path
         self.dependencies = dependencies
+        self.audit_result = None
 
         self.setWindowTitle("Dependency Usage Audit")
         self.setMinimumSize(700, 500)
@@ -117,9 +118,25 @@ class AuditDialog(QDialog):
         self.text_area.setReadOnly(True)
         layout.addWidget(self.text_area)
 
+        button_layout = QHBoxLayout()
+
+        self.remove_unused_btn = QPushButton("Remove Unused Dependencies")
+        self.remove_unused_btn.clicked.connect(self._remove_unused)
+        self.remove_unused_btn.setEnabled(False)
+        button_layout.addWidget(self.remove_unused_btn)
+
+        self.add_missing_btn = QPushButton("Add Missing Dependencies")
+        self.add_missing_btn.clicked.connect(self._add_missing)
+        self.add_missing_btn.setEnabled(False)
+        button_layout.addWidget(self.add_missing_btn)
+
+        button_layout.addStretch()
+
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
 
         self._run_audit()
 
@@ -128,10 +145,61 @@ class AuditDialog(QDialog):
 
         self.text_area.append("Scanning project for dependency usage...\n")
 
-        result = audit_dependencies(self.project_path, self.dependencies)
+        self.audit_result = audit_dependencies(self.project_path, self.dependencies)
 
-        report = generate_audit_report(result)
+        report = generate_audit_report(self.audit_result)
         self.text_area.setPlainText(report)
+
+        self.remove_unused_btn.setEnabled(len(self.audit_result.unused_dependencies) > 0)
+        self.add_missing_btn.setEnabled(len(self.audit_result.missing_dependencies) > 0)
+
+    def _remove_unused(self) -> None:
+        from .core.dependency_auditor import remove_unused_dependencies
+
+        if not self.audit_result or not self.audit_result.unused_dependencies:
+            return
+
+        unused = [dep.package_name for dep in self.audit_result.unused_dependencies]
+
+        reply = QMessageBox.question(
+            self,
+            "Remove Unused Dependencies",
+            f"Remove {len(unused)} unused dependencies from requirements?\n\n{', '.join(unused[:5])}{'...' if len(unused) > 5 else ''}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            count, files = remove_unused_dependencies(self.project_path, unused)
+            self.text_area.append(f"\n\nRemoved dependencies from {count} file(s):")
+            for f in files:
+                self.text_area.append(f"  • {f}")
+
+            self.remove_unused_btn.setEnabled(False)
+
+    def _add_missing(self) -> None:
+        from .core.dependency_auditor import add_missing_dependencies
+
+        if not self.audit_result or not self.audit_result.missing_dependencies:
+            return
+
+        missing = [pkg for pkg, _ in self.audit_result.missing_dependencies]
+
+        reply = QMessageBox.question(
+            self,
+            "Add Missing Dependencies",
+            f"Add {len(missing)} missing dependencies to requirements.txt?\n\n{', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            count, files = add_missing_dependencies(self.project_path, missing)
+            if count > 0:
+                self.text_area.append(f"\n\nAdded dependencies to {count} file(s):")
+                for f in files:
+                    self.text_area.append(f"  • {f}")
+                self.add_missing_btn.setEnabled(False)
+            else:
+                self.text_area.append("\n\nNo requirements.txt found. Cannot add dependencies.")
 
 
 class MigrationGuideDialog(QDialog):
