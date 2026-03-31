@@ -1,6 +1,6 @@
 # LibFix
 
-A powerful Python dependency analyzer and updater that finds inactive dependencies, suggests alternatives, and automatically migrates your code.
+A powerful Python dependency analyzer and updater that finds inactive dependencies, suggests alternatives, automatically migrates code, and audits dependency usage.
 
 ## Features
 
@@ -8,6 +8,7 @@ A powerful Python dependency analyzer and updater that finds inactive dependenci
 - **Inactivity Analysis**: Identifies packages that haven't been updated in over 2 years
 - **Alternative Suggestions**: Recommends actively maintained replacements
 - **Automatic Migration**: Updates both dependency files AND source code imports/function calls
+- **Usage Auditing**: Finds unused dependencies and missing imports
 - **PyPI Integration**: Fetches latest versions and package information
 - **Caching**: Local cache to speed up repeated analysis
 - **CLI + GUI**: Use via command line or graphical interface
@@ -37,10 +38,10 @@ pip install -e ".[gui]"
 python -m src.main
 ```
 
-Or after installation:
-```bash
-libfix-gui  # or just libfix for CLI
-```
+The GUI provides:
+- **Select Python Project**: Choose a project to analyze
+- **Audit Usage**: Check if dependencies are actually used in the code
+- **Replace Selected**: Replace an inactive dependency with an alternative
 
 ### CLI
 
@@ -65,6 +66,28 @@ libfix cache clear
 libfix cache info
 ```
 
+## Workflow
+
+1. **Select a project** - Choose a Python project directory
+2. **Scan dependencies** - LibFix finds all dependency files
+3. **Analyze packages** - Fetches PyPI data to check for inactivity
+4. **Review results** - See inactive packages with alternative suggestions
+5. **Replace dependency** - Choose an alternative to update requirements
+6. **Auto-migrate code** - LibFix updates imports and function calls
+7. **Audit usage** - Verify all dependencies are actually used in the code
+
+## Dependency Usage Audit
+
+LibFix can audit your project to find:
+
+- **Unused dependencies**: Packages in requirements that aren't imported anywhere
+- **Missing dependencies**: Imports that don't have corresponding entries in requirements
+
+This helps:
+- Remove bloat from `requirements.txt`
+- Find packages you forgot to add to dependencies
+- Verify migrations are complete
+
 ## Supported Migrations
 
 LibFix can automatically migrate code for these packages:
@@ -80,16 +103,6 @@ LibFix can automatically migrate code for these packages:
 | `requests` | `httpx` | Imports, `get()`, `post()`, etc. |
 | `simplejson` | `json` | Imports, `dump()`, `dumps()`, etc. |
 | `chardet` | `charset-normalizer` | Imports, `detect()` |
-
-## Workflow
-
-1. **Select a project** - Choose a Python project directory
-2. **Scan dependencies** - LibFix finds all dependency files
-3. **Analyze packages** - Fetches PyPI data to check for inactivity
-4. **Review results** - See inactive packages with alternative suggestions
-5. **Replace dependency** - Choose an alternative to update requirements
-6. **Auto-migrate code** - LibFix updates imports and function calls
-7. **Verify** - Re-scan to confirm changes
 
 ## Configuration
 
@@ -133,12 +146,13 @@ LibFix/
 │       ├── dependency_parser.py     # Parse various formats
 │       ├── dependency_analyzer.py  # Check for inactivity
 │       ├── dependency_replacer.py  # Update requirements files
+│       ├── dependency_auditor.py  # Audit dependency usage
 │       ├── pypi_utils.py           # PyPI API integration
 │       ├── cache.py                # Local caching
 │       ├── alternatives.py         # Alternative package suggestions
 │       ├── migration_guide.py      # Code migration patterns
 │       └── libraries_io.py        # Libraries.io integration
-├── tests/                  # Unit tests
+├── tests/                  # Unit tests (56 tests)
 └── pyproject.toml          # Project configuration
 ```
 

@@ -102,6 +102,38 @@ class AlternativeSelectionDialog(QDialog):
         return None
 
 
+class AuditDialog(QDialog):
+    def __init__(self, parent: QWidget, project_path: str, dependencies: list[str]):
+        super().__init__(parent)
+        self.project_path = project_path
+        self.dependencies = dependencies
+
+        self.setWindowTitle("Dependency Usage Audit")
+        self.setMinimumSize(700, 500)
+
+        layout = QVBoxLayout(self)
+
+        self.text_area = QTextEdit()
+        self.text_area.setReadOnly(True)
+        layout.addWidget(self.text_area)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+        self._run_audit()
+
+    def _run_audit(self) -> None:
+        from .core.dependency_auditor import audit_dependencies, generate_audit_report
+
+        self.text_area.append("Scanning project for dependency usage...\n")
+
+        result = audit_dependencies(self.project_path, self.dependencies)
+
+        report = generate_audit_report(result)
+        self.text_area.setPlainText(report)
+
+
 class MigrationGuideDialog(QDialog):
     def __init__(self, parent: QWidget, old_package: str, new_package: str, project_path: str):
         super().__init__(parent)
@@ -174,6 +206,11 @@ class MainWindow(QMainWindow):
         self.select_button = QPushButton("Select Python Project")
         self.select_button.clicked.connect(self.select_project_directory)
         header_layout.addWidget(self.select_button)
+
+        self.audit_button = QPushButton("Audit Usage")
+        self.audit_button.clicked.connect(self.audit_dependencies)
+        self.audit_button.setEnabled(False)
+        header_layout.addWidget(self.audit_button)
 
         self.replace_button = QPushButton("Replace Selected")
         self.replace_button.clicked.connect(self.replace_selected)
@@ -267,6 +304,7 @@ class MainWindow(QMainWindow):
         self.dependencies_with_info = deps_with_info
         self.progress_bar.setVisible(False)
         self.select_button.setEnabled(True)
+        self.audit_button.setEnabled(True)
         self._update_dependency_list_with_info()
 
     def on_item_clicked(self, item: QListWidget.item) -> None:
@@ -288,6 +326,15 @@ class MainWindow(QMainWindow):
                 if inactive:
                     inactive_deps[dep] = (inactive, alts)
         return inactive_deps
+
+    def audit_dependencies(self) -> None:
+        if not self.project_directory or not self.dependencies_with_info:
+            QMessageBox.warning(self, "No Project", "Please select a project first.")
+            return
+
+        deps = list(self.dependencies_with_info.keys())
+        dialog = AuditDialog(self, self.project_directory, deps)
+        dialog.exec()
 
     def _update_dependency_list_with_info(self) -> None:
         self.dependency_list_widget.clear()

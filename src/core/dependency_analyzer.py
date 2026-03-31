@@ -60,8 +60,8 @@ def is_potentially_inactive(
                 ]
                 if release_dates:
                     latest_release_date = max(release_dates)
-        except Exception as e:
-            logger.warning(f"Error parsing versions for {package_name}: {e}")
+        except Exception:
+            pass
 
     if latest_release_date:
         from datetime import datetime
