@@ -44,6 +44,17 @@ KNOWN_STANDARD_LIB = {
     "pipes", "errno", "syslog", "resource", "nis", "grp", "pwd",
     "spwd", "crypt", "termios", "TERMIOS", "select", "poll", "kqueue",
     "mmap", "reprlib", "graphlib", "contextvars", "dataclasses",
+    "heapq", "traceback", "unittest", "atexit", "gc", "trace",
+    "functools", "itertools", "collections", "copy", "pprint",
+    "textwrap", "unicodedata", "warnings", "signal", "inspect",
+}
+
+PACKAGE_ALIASES = {
+    "sklearn": "scikit-learn",
+    "PIL": "pillow",
+    "pil": "pillow",
+    "cv2": "opencv-python",
+    "tensorflow": "tf",
 }
 
 
@@ -114,7 +125,8 @@ def _normalize_package_name(name: str) -> str:
 def audit_dependencies(
     project_path: str,
     dependencies: list[str],
-    known_optional: Optional[list[str]] = None
+    known_optional: Optional[list[str]] = None,
+    project_name: Optional[str] = None
 ) -> AuditResult:
     """Audit dependencies against actual usage in the project.
 
@@ -122,6 +134,7 @@ def audit_dependencies(
         project_path: Path to the project.
         dependencies: List of dependency strings (e.g., "requests>=2.28").
         known_optional: List of optional dependency names.
+        project_name: Name of the project (to exclude from missing deps).
 
     Returns:
         AuditResult with unused, missing, and all dependencies.
@@ -133,22 +146,31 @@ def audit_dependencies(
     unused: list[UsageResult] = []
     missing: list[tuple[str, list[str]]] = []
 
-    used_imports = set(imports.keys())
+    dep_names_normalized = {_normalize_package_name(_extract_package_name(d)) for d in dependencies}
+    for alias, real in PACKAGE_ALIASES.items():
+        if _normalize_package_name(real) in dep_names_normalized:
+            dep_names_normalized.add(_normalize_package_name(alias))
+
+    if project_name:
+        dep_names_normalized.add(_normalize_package_name(project_name))
 
     for dep in dependencies:
         pkg_name = _extract_package_name(dep)
         pkg_normalized = _normalize_package_name(pkg_name)
-        pkg_name_dash = pkg_name.replace("_", "-")
 
         import_lines = []
 
         for imp_name, lines in imports.items():
             imp_normalized = _normalize_package_name(imp_name)
-            if imp_normalized == pkg_normalized or imp_name == pkg_name_dash:
+            if imp_normalized == pkg_normalized:
                 import_lines.extend(lines)
+            if imp_normalized in PACKAGE_ALIASES:
+                alias_target = _normalize_package_name(PACKAGE_ALIASES[imp_normalized])
+                if alias_target == pkg_normalized:
+                    import_lines.extend(lines)
 
         is_used = len(import_lines) > 0
-        is_optional = pkg_normalized in [_normalize_package_name(o) for o in known_optional]
+        is_optional = pkg_normalized in {_normalize_package_name(o) for o in known_optional}
 
         result = UsageResult(
             package_name=pkg_name,
@@ -167,10 +189,16 @@ def audit_dependencies(
         if imp_normalized in KNOWN_STANDARD_LIB:
             continue
 
-        dep_names_normalized = [_normalize_package_name(_extract_package_name(d)) for d in dependencies]
-        if imp_normalized not in dep_names_normalized:
-            files = [line[0] for line in lines]
-            missing.append((imp_name, files))
+        if imp_normalized in dep_names_normalized:
+            continue
+
+        if imp_normalized in PACKAGE_ALIASES:
+            alias_target = _normalize_package_name(PACKAGE_ALIASES[imp_normalized])
+            if alias_target in dep_names_normalized:
+                continue
+
+        files = [line[0] for line in lines]
+        missing.append((imp_name, files))
 
     unused_summary = f"{len(unused)} unused" if unused else "All dependencies used"
     missing_summary = f"{len(missing)} missing" if missing else "No missing dependencies"

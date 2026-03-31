@@ -7,6 +7,7 @@ from src.core.dependency_auditor import (
     _extract_package_name,
     _normalize_package_name,
     KNOWN_STANDARD_LIB,
+    PACKAGE_ALIASES,
 )
 
 
@@ -104,3 +105,20 @@ class TestDependencyAuditor:
         assert "os" in KNOWN_STANDARD_LIB
         assert "sys" in KNOWN_STANDARD_LIB
         assert "json" in KNOWN_STANDARD_LIB
+        assert "unittest" in KNOWN_STANDARD_LIB
+        assert "heapq" in KNOWN_STANDARD_LIB
+        assert "traceback" in KNOWN_STANDARD_LIB
+
+    def test_sklearn_alias_recognized(self):
+        temp_dir = tempfile.mkdtemp()
+        py_file = os.path.join(temp_dir, "test.py")
+
+        with open(py_file, "w") as f:
+            f.write("from sklearn import datasets\n")
+
+        result = audit_dependencies(temp_dir, ["scikit-learn"])
+
+        assert len(result.missing_dependencies) == 0
+
+        os.unlink(py_file)
+        os.rmdir(temp_dir)
