@@ -10,6 +10,27 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def is_on_pypi(package_name: str) -> bool:
+    """Check if a package exists on PyPI.
+
+    Args:
+        package_name: Name of the package.
+
+    Returns:
+        True if the package exists on PyPI, False otherwise.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "index", "versions", package_name],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        return result.returncode == 0 and "not found" not in result.stdout.lower()
+    except Exception:
+        return True
+
+
 @dataclass
 class IntegrationResult:
     success: bool
@@ -214,11 +235,17 @@ def integrate_dependency(
     messages = []
 
     if install:
-        success, msg = install_package(package_name)
-        result.installed = success
-        messages.append(msg)
-        if not success:
+        if not is_on_pypi(package_name):
+            result.installed = False
+            msg = f"Skipped {package_name} (not on PyPI - likely local package)"
+            messages.append(msg)
             result.errors.append(msg)
+        else:
+            success, msg = install_package(package_name)
+            result.installed = success
+            messages.append(msg)
+            if not success:
+                result.errors.append(msg)
 
     if files_using_it:
         count, results = add_imports_to_project(project_path, package_name, files_using_it)
