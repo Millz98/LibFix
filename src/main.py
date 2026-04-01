@@ -166,20 +166,31 @@ class AuditDialog(QDialog):
         if not self.audit_result or not self.audit_result.unused_dependencies:
             return
 
-        unused = [dep.package_name for dep in self.audit_result.unused_dependencies]
+        unused_safe = [dep.package_name for dep in self.audit_result.unused_dependencies if dep.confidence == "high"]
+        unused_uncertain = [dep.package_name for dep in self.audit_result.unused_dependencies if dep.confidence != "high"]
+
+        if not unused_safe:
+            self.text_area.append("\n\nNo dependencies are safe to remove automatically.")
+            if unused_uncertain:
+                self.text_area.append(f"Found {len(unused_uncertain)} dependencies with uncertain usage - please verify manually.")
+            return
 
         reply = QMessageBox.question(
             self,
             "Remove Unused Dependencies",
-            f"Remove {len(unused)} unused dependencies from requirements?\n\n{', '.join(unused[:5])}{'...' if len(unused) > 5 else ''}",
+            f"Remove {len(unused_safe)} safe unused dependencies?\n\nSafe: {', '.join(unused_safe[:5])}{'...' if len(unused_safe) > 5 else ''}\n\n{len(unused_uncertain)} uncertain dependencies will be skipped.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            count, files = remove_unused_dependencies(self.project_path, unused)
+            count, files, skipped = remove_unused_dependencies(self.project_path, unused_safe, safe_only=True)
             self.text_area.append(f"\n\nRemoved dependencies from {count} file(s):")
             for f in files:
                 self.text_area.append(f"  • {f}")
+            if skipped:
+                self.text_area.append(f"\nSkipped {len(skipped)} uncertain dependencies")
+                for s in skipped[:5]:
+                    self.text_area.append(f"  • {s}")
 
             self.remove_unused_btn.setEnabled(False)
 

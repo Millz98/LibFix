@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 class UsageResult:
     package_name: str
     is_used: bool
-    import_lines: list[tuple[str, int]]
+    import_lines: list[tuple[str, int]] = field(default_factory=list)
     is_optional: bool = False
+    confidence: str = "high"
+    usage_type: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -23,7 +25,7 @@ class AuditResult:
     summary: str
 
 
-KNOWN_STANDARD_LIB = {
+KNOWN_STANDARD_LIB: set[str] = {
     "os", "sys", "re", "json", "time", "datetime", "date", "timedelta",
     "collections", "itertools", "functools", "operator", "enum", "typing",
     "pathlib", "urllib", "http", "html", "xml", "csv", "io", "buffer",
@@ -31,31 +33,86 @@ KNOWN_STANDARD_LIB = {
     "threading", "multiprocessing", "subprocess", "socket", "ssl",
     "email", "smtplib", "poplib", "imaplib", "uuid", "hashlib",
     "hmac", "secrets", "base64", "binascii", "struct", "codecs",
-    "argparse", "optparse", "getopt", "configparser", "argparse",
+    "argparse", "optparse", "getopt", "configparser",
     "platform", "sysconfig", "abc", "asyncio", "gc", "weakref",
     "types", "inspect", "dis", "compileall", "marshal", "code",
     "ast", "symtable", "tokenize", "keyword", "token", "linecache",
     "random", "statistics", "math", "cmath", "decimal", "fractions",
     "numbers", "curses", "textwrap", "string", "unicodedata", "locale",
-    "gettext", "bundles", "gzip", "bz2", "lzma", "zipfile", "tarfile",
+    "gettext", "gzip", "bz2", "lzma", "zipfile", "tarfile",
     "shutil", "glob", "fnmatch", "tempfile", "tempdir", "fileinput",
-    "stat", "statvfs", "filecmp", "dirent", "msvcrt", "readline",
-    "parser", "symbol", "ast", "fpectl", "pty", "tty", "fcntl",
-    "pipes", "errno", "syslog", "resource", "nis", "grp", "pwd",
-    "spwd", "crypt", "termios", "TERMIOS", "select", "poll", "kqueue",
-    "mmap", "reprlib", "graphlib", "contextvars", "dataclasses",
-    "heapq", "traceback", "unittest", "atexit", "gc", "trace",
-    "functools", "itertools", "collections", "copy", "pprint",
-    "textwrap", "unicodedata", "warnings", "signal", "inspect",
+    "stat", "filecmp", "select", "poll", "mmap",
+    "heapq", "traceback", "unittest", "atexit", "trace",
+    "pprint", "signal", "contextvars", "dataclasses",
+    "graphlib", "pkgutil", "zipimport", "imp", "importlib",
+    "fractions", "bisect", "array", "copyreg", "dbm", "msvcrt",
+    "grp", "pwd", "termios", "fcntl", "resource", "errno",
+    "exceptions", "Builtins", "PrettyTable", "colorsys",
+    "concurrent", "concurrent.futures", "multiprocessing.pool",
+    "queue", "mimetypes", "netrc", "plistlib", "zipfile",
+    "sched", "queue", "ensurepip", "venv", "zipapp",
+    "pkg_resources", "setuptools", "distutils",
 }
 
-PACKAGE_ALIASES = {
+PACKAGE_ALIASES: dict[str, str] = {
     "sklearn": "scikit-learn",
     "PIL": "pillow",
     "pil": "pillow",
     "cv2": "opencv-python",
+    "cv": "opencv-python",
     "tensorflow": "tf",
+    "tf": "tensorflow",
+    "np": "numpy",
+    "pd": "pandas",
+    "plt": "matplotlib",
+    "sns": "seaborn",
+    "pd": "pandas",
+    "torch": "pytorch",
+    "keras": "keras",
+    "sk": "scikit-learn",
+    "sp": "scipy",
+    "sc": "scipy",
+    "bs4": "beautifulsoup4",
+    "bs": "beautifulsoup4",
+    "yaml": "pyyaml",
+    "yml": "pyyaml",
+    "ftfy": "ftfy",
+    "uj": "ujson",
+    "ujson": "ujson",
+    "simplejson": "simplejson",
+    "sqlalchemy": "sqlalchemy",
+    "psycopg2": "psycopg2-binary",
+    "pg2": "psycopg2-binary",
 }
+
+DYNAMIC_IMPORT_PATTERNS: list[tuple[str, str]] = [
+    (r"importlib\.import_module\s*\(\s*['\"](\w+)['\"]", "importlib.import_module"),
+    (r"importlib\.import_module\s*\(\s*f['\"].*?['\"]", "importlib.import_module (dynamic)"),
+    (r"__import__\s*\(\s*['\"](\w+)['\"]", "__import__"),
+    (r"__import__\s*\(\s*f['\"].*?['\"]", "__import__ (dynamic)"),
+    (r"from\s+importlib\s+import\s+lazy_loader", "lazy import"),
+    (r"importlib\.LazyLoader", "lazy import"),
+    (r"getattr\s*\(\s*__import__\s*\(", "dynamic __import__"),
+    (r"exec\s*\(\s*['\"]import\s+(\w+)", "exec import"),
+    (r"eval\s*\(\s*['\"]import\s+(\w+)", "eval import"),
+]
+
+ENTRY_POINT_PATTERNS: list[tuple[str, str]] = [
+    (r"entry_points\s*=", "entry points"),
+    (r"console_scripts\s*=", "console scripts"),
+    (r"gui_scripts\s*=", "gui scripts"),
+    (r"scripts\s*=", "scripts"),
+    (r"pkg_resources\.EntryPoint", "pkg_resources entry"),
+]
+
+PLUGIN_PATTERNS: list[tuple[str, str]] = [
+    (r"pluggy\.register", "pluggy plugin"),
+    (r"stevedore", "stevedore plugin"),
+    (r"yaml\.add_constructor", "yaml plugin"),
+    (r"\.register\s*\(", "plugin registration"),
+    (r"setuptools\.find_packages", "setuptools discovery"),
+    (r"pkg_resources\.iter_entry_points", "pkg_resources discovery"),
+]
 
 
 def scan_imports(project_path: str) -> dict[str, list[tuple[str, int]]]:
@@ -65,6 +122,7 @@ def scan_imports(project_path: str) -> dict[str, list[tuple[str, int]]]:
         Dict mapping package names to list of (file_path, line_number).
     """
     imports: dict[str, list[tuple[str, int]]] = {}
+    dynamic_imports: dict[str, list[tuple[str, int]]] = {}
 
     for root, _, files in os.walk(project_path):
         if any(skip in root for skip in ["venv", "__pycache__", ".git", ".venv", "node_modules"]):
@@ -77,22 +135,55 @@ def scan_imports(project_path: str) -> dict[str, list[tuple[str, int]]]:
             file_path = os.path.join(root, file)
             try:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    for line_num, line in enumerate(f, 1):
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
+                    content = f.read()
 
-                        import_matches = _extract_imports(line)
-                        for imp in import_matches:
-                            pkg_name = _normalize_package_name(imp)
-                            if pkg_name and pkg_name not in KNOWN_STANDARD_LIB:
-                                if pkg_name not in imports:
-                                    imports[pkg_name] = []
-                                imports[pkg_name].append((file_path, line_num))
+                for line_num, line in enumerate(content.split("\n"), 1):
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+
+                    import_matches = _extract_imports(line)
+                    for imp in import_matches:
+                        pkg_name = _normalize_package_name(imp)
+                        if pkg_name and pkg_name not in KNOWN_STANDARD_LIB:
+                            if pkg_name not in imports:
+                                imports[pkg_name] = []
+                            imports[pkg_name].append((file_path, line_num))
+
+                for pattern, ptype in DYNAMIC_IMPORT_PATTERNS:
+                    matches = re.finditer(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        if match.lastindex and match.lastindex >= 1:
+                            pkg_name = _normalize_package_name(match.group(1))
+                        else:
+                            pkg_name = "(dynamic)"
+                        if pkg_name not in dynamic_imports:
+                            dynamic_imports[pkg_name] = []
+                        dynamic_imports[pkg_name].append((file_path, 0))
+
             except (OSError, UnicodeDecodeError):
                 continue
 
+    for pkg, lines in dynamic_imports.items():
+        if pkg != "(dynamic)":
+            if pkg not in imports:
+                imports[pkg] = []
+            imports[pkg].extend(lines)
+
     return imports
+
+
+def check_file_for_patterns(file_path: str, patterns: list[tuple[str, str]]) -> bool:
+    """Check if a file contains any of the given patterns."""
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        for pattern, _ in patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                return True
+    except (OSError, UnicodeDecodeError):
+        pass
+    return False
 
 
 def _extract_imports(line: str) -> list[str]:
@@ -118,8 +209,75 @@ def _extract_imports(line: str) -> list[str]:
 
 def _normalize_package_name(name: str) -> str:
     """Normalize package name for comparison."""
-    name = name.lower().replace("-", "_")
+    name = name.lower().replace("-", "_").replace(".", "_")
     return name
+
+
+def _check_dependency_safety(
+    project_path: str,
+    package_name: str,
+    pkg_normalized: str
+) -> tuple[str, list[str]]:
+    """Check if a dependency is used in potentially dynamic ways.
+
+    Returns:
+        Tuple of (confidence_level, list of usage_types).
+    """
+    usage_types = []
+    confidence = "high"
+
+    for root, _, files in os.walk(project_path):
+        if any(skip in root for skip in ["venv", "__pycache__", ".git", ".venv"]):
+            continue
+
+        for file in files:
+            file_path = os.path.join(root, file)
+            rel_path = os.path.relpath(file_path, project_path)
+
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+
+                if pkg_normalized in content.lower():
+                    if file.endswith(".py"):
+                        for pattern, ptype in DYNAMIC_IMPORT_PATTERNS:
+                            if re.search(pattern, content, re.IGNORECASE):
+                                if ptype not in usage_types:
+                                    usage_types.append(ptype)
+                                confidence = "low"
+
+                    for pattern, ptype in ENTRY_POINT_PATTERNS:
+                        if re.search(pattern, content, re.IGNORECASE):
+                            if ptype not in usage_types:
+                                usage_types.append(ptype)
+
+                    for pattern, ptype in PLUGIN_PATTERNS:
+                        if re.search(pattern, content, re.IGNORECASE):
+                            if ptype not in usage_types:
+                                usage_types.append(ptype)
+
+                    if "pytest" in rel_path or "test_" in file or "_test.py" in file:
+                        if "test" not in usage_types:
+                            usage_types.append("test usage")
+                        confidence = "medium"
+
+                    if "setup.py" in file or "pyproject.toml" in file:
+                        if "setup" not in usage_types:
+                            usage_types.append("setup/dependency")
+                        confidence = "medium"
+
+                    if any(x in rel_path for x in ["examples", "demo", "scripts"]):
+                        if "example" not in usage_types:
+                            usage_types.append("example/demo script")
+                        confidence = "medium"
+
+            except (OSError, UnicodeDecodeError):
+                continue
+
+    if not usage_types:
+        usage_types.append("static import only")
+
+    return confidence, usage_types
 
 
 def audit_dependencies(
@@ -159,24 +317,43 @@ def audit_dependencies(
         pkg_normalized = _normalize_package_name(pkg_name)
 
         import_lines = []
+        usage_types = []
 
         for imp_name, lines in imports.items():
             imp_normalized = _normalize_package_name(imp_name)
             if imp_normalized == pkg_normalized:
                 import_lines.extend(lines)
+                usage_types.append("static import")
             if imp_normalized in PACKAGE_ALIASES:
                 alias_target = _normalize_package_name(PACKAGE_ALIASES[imp_normalized])
                 if alias_target == pkg_normalized:
                     import_lines.extend(lines)
+                    usage_types.append(f"alias import ({imp_name})")
 
         is_used = len(import_lines) > 0
         is_optional = pkg_normalized in {_normalize_package_name(o) for o in known_optional}
+
+        if not is_used:
+            confidence, safety_types = _check_dependency_safety(
+                project_path, pkg_name, pkg_normalized
+            )
+            if safety_types and safety_types != ["static import only"]:
+                is_used = True
+                usage_types.extend(safety_types)
+                if "low" not in confidence:
+                    confidence = "medium"
+        else:
+            confidence, _ = _check_dependency_safety(
+                project_path, pkg_name, pkg_normalized
+            )
 
         result = UsageResult(
             package_name=pkg_name,
             is_used=is_used,
             import_lines=import_lines,
             is_optional=is_optional,
+            confidence=confidence,
+            usage_type=usage_types if usage_types else ["no usage detected"],
         )
         dep_results.append(result)
 
@@ -200,7 +377,10 @@ def audit_dependencies(
         files = [line[0] for line in lines]
         missing.append((imp_name, files))
 
-    unused_summary = f"{len(unused)} unused" if unused else "All dependencies used"
+    unused_safe = [u for u in unused if u.confidence == "high"]
+    unused_uncertain = [u for u in unused if u.confidence != "high"]
+
+    unused_summary = f"{len(unused)} unused ({len(unused_safe)} safe to remove, {len(unused_uncertain)} uncertain)" if unused else "All dependencies used"
     missing_summary = f"{len(missing)} missing" if missing else "No missing dependencies"
 
     summary = f"Audit complete: {unused_summary}, {missing_summary}"
@@ -226,23 +406,38 @@ def generate_audit_report(result: AuditResult) -> str:
     lines.append("DEPENDENCY USAGE AUDIT REPORT")
     lines.append("=" * 50)
 
+    unused_safe = [u for u in result.unused_dependencies if u.confidence == "high"]
+    unused_uncertain = [u for u in result.unused_dependencies if u.confidence != "high"]
+
     if result.unused_dependencies:
-        lines.append(f"\n⚠️  UNUSED DEPENDENCIES ({len(result.unused_dependencies)}):")
-        for dep in result.unused_dependencies:
-            if not dep.is_optional:
-                lines.append(f"  • {dep.package_name}")
+        lines.append(f"\nUNUSED DEPENDENCIES ({len(result.unused_dependencies)} total):")
+
+        if unused_safe:
+            lines.append(f"\n  SAFE TO REMOVE ({len(unused_safe)}):")
+            for dep in unused_safe:
+                lines.append(f"    [SAFE] {dep.package_name}")
+
+        if unused_uncertain:
+            lines.append(f"\n  UNCERTAIN - VERIFY BEFORE REMOVING ({len(unused_uncertain)}):")
+            for dep in unused_uncertain:
+                usage = ", ".join(dep.usage_type[:2]) if dep.usage_type else "unknown"
+                lines.append(f"    [CAUTION:{dep.confidence.upper()}] {dep.package_name}")
+                lines.append(f"         Reason: {usage}")
+                if dep.import_lines:
+                    for fp, ln in dep.import_lines[:2]:
+                        lines.append(f"         - {os.path.basename(fp)}:{ln}")
 
     if result.missing_dependencies:
-        lines.append(f"\n⚠️  MISSING DEPENDENCIES ({len(result.missing_dependencies)}):")
+        lines.append(f"\nMISSING DEPENDENCIES ({len(result.missing_dependencies)}):")
         for pkg, files in result.missing_dependencies:
-            lines.append(f"  • {pkg}")
+            lines.append(f"  {pkg}")
             for f in files[:3]:
                 lines.append(f"      - {f}")
             if len(files) > 3:
                 lines.append(f"      ... and {len(files) - 3} more")
 
     if not result.unused_dependencies and not result.missing_dependencies:
-        lines.append("\n✅ All dependencies are used and no missing dependencies!")
+        lines.append("\nAll dependencies are used and no missing dependencies!")
 
     lines.append(f"\n{result.summary}")
 
@@ -252,22 +447,41 @@ def generate_audit_report(result: AuditResult) -> str:
 def remove_unused_dependencies(
     project_path: str,
     unused_dependencies: list[str],
-    create_backup: bool = True
-) -> tuple[int, list[str]]:
+    create_backup: bool = True,
+    safe_only: bool = True
+) -> tuple[int, list[str], list[str]]:
     """Remove unused dependencies from project files.
 
     Args:
         project_path: Path to the project.
         unused_dependencies: List of package names to remove.
         create_backup: Whether to create backup files.
+        safe_only: Only remove dependencies marked as safe (confidence='high').
 
     Returns:
-        Tuple of (files modified count, list of modified files).
+        Tuple of (files modified count, list of modified files, list of skipped).
     """
     import shutil
     from .dependency_parser import parse_all
 
     modified_files = []
+    skipped = []
+
+    if safe_only:
+        safe_deps = set()
+        imports = scan_imports(project_path)
+
+        for dep in unused_dependencies:
+            pkg_normalized = _normalize_package_name(dep)
+            confidence, _ = _check_dependency_safety(project_path, dep, pkg_normalized)
+            if confidence == "high":
+                safe_deps.add(dep)
+            else:
+                skipped.append(f"{dep} (confidence: {confidence})")
+
+        unused_dependencies = list(safe_deps)
+        if skipped:
+            logger.info(f"Skipped {len(skipped)} dependencies with uncertain usage")
 
     for root, _, files in os.walk(project_path):
         if any(skip in root for skip in ["venv", "__pycache__", ".git"]):
@@ -309,11 +523,10 @@ def remove_unused_dependencies(
             except (OSError, UnicodeDecodeError) as e:
                 logger.error(f"Error updating {file_path}: {e}")
 
-    return len(modified_files), modified_files
+    return len(modified_files), modified_files, skipped
 
 
 def _remove_from_python(content: str, package_name: str) -> str:
-    import re
     lines = content.split("\n")
     new_lines = []
     skip_next = False
@@ -353,7 +566,6 @@ def _remove_from_python(content: str, package_name: str) -> str:
 
 
 def _remove_from_requirements(content: str, package_name: str) -> str:
-    import re
     lines = content.split("\n")
     new_lines = []
 
@@ -374,7 +586,6 @@ def _remove_from_requirements(content: str, package_name: str) -> str:
 
 
 def _remove_from_setup_cfg(content: str, package_name: str) -> str:
-    import re
     dep_normalized = _normalize_package_name(package_name)
 
     content = re.sub(
@@ -388,7 +599,6 @@ def _remove_from_setup_cfg(content: str, package_name: str) -> str:
 
 
 def _remove_from_toml(content: str, package_name: str) -> str:
-    import re
     dep_normalized = _normalize_package_name(package_name)
 
     content = re.sub(

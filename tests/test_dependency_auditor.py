@@ -134,7 +134,7 @@ class TestFixDependencies:
         with open(req_file, "w") as f:
             f.write("requests\nflask\nunused-pkg\n")
 
-        count, files = remove_unused_dependencies(temp_dir, ["unused-pkg"])
+        count, files, skipped = remove_unused_dependencies(temp_dir, ["unused-pkg"])
 
         assert count == 1
         with open(req_file, "r") as f:
@@ -162,4 +162,87 @@ class TestFixDependencies:
         assert "numpy" in content
 
         os.unlink(req_file)
+        os.rmdir(temp_dir)
+
+
+class TestDependencySafety:
+    def test_confidence_scoring(self):
+        temp_dir = tempfile.mkdtemp()
+        py_file = os.path.join(temp_dir, "test.py")
+        req_file = os.path.join(temp_dir, "requirements.txt")
+
+        with open(py_file, "w") as f:
+            f.write("import requests\n")
+        with open(req_file, "w") as f:
+            f.write("requests\nunused-pkg\n")
+
+        result = audit_dependencies(temp_dir, ["requests", "unused-pkg"])
+
+        unused_pkg = next(u for u in result.unused_dependencies if u.package_name == "unused-pkg")
+        assert unused_pkg.confidence == "high"
+
+        os.unlink(py_file)
+        os.unlink(req_file)
+        os.rmdir(temp_dir)
+
+    def test_dynamic_import_not_flagged_as_unused(self):
+        temp_dir = tempfile.mkdtemp()
+        py_file = os.path.join(temp_dir, "test.py")
+        req_file = os.path.join(temp_dir, "requirements.txt")
+
+        with open(py_file, "w") as f:
+            f.write("import importlib\npkg = importlib.import_module('mypackage')\n")
+        with open(req_file, "w") as f:
+            f.write("mypackage\n")
+
+        result = audit_dependencies(temp_dir, ["mypackage"])
+
+        assert len(result.unused_dependencies) == 0
+
+        os.unlink(py_file)
+        os.unlink(req_file)
+        os.rmdir(temp_dir)
+
+    def test_package_aliases_recognized(self):
+        temp_dir = tempfile.mkdtemp()
+        py_file = os.path.join(temp_dir, "test.py")
+        req_file = os.path.join(temp_dir, "requirements.txt")
+
+        with open(py_file, "w") as f:
+            f.write("import sklearn\n")
+        with open(req_file, "w") as f:
+            f.write("scikit-learn\n")
+
+        result = audit_dependencies(temp_dir, ["scikit-learn"])
+
+        assert len(result.unused_dependencies) == 0
+
+        os.unlink(py_file)
+        os.unlink(req_file)
+        os.rmdir(temp_dir)
+
+    def test_safe_only_removal(self):
+        temp_dir = tempfile.mkdtemp()
+        py_file = os.path.join(temp_dir, "test.py")
+        req_file = os.path.join(temp_dir, "requirements.txt")
+
+        with open(py_file, "w") as f:
+            f.write("import requests\n")
+        with open(req_file, "w") as f:
+            f.write("requests\nunused-safe\n")
+
+        count, files, skipped = remove_unused_dependencies(
+            temp_dir, ["unused-safe"], safe_only=True
+        )
+
+        assert count == 1
+        assert len(skipped) == 0
+        with open(req_file, "r") as f:
+            content = f.read()
+        assert "unused-safe" not in content
+        assert "requests" in content
+
+        os.unlink(py_file)
+        os.unlink(req_file)
+        os.unlink(f"{req_file}.bak")
         os.rmdir(temp_dir)
