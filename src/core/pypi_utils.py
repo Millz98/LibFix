@@ -3,6 +3,37 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+STDLIB_MODULES = {
+    "os", "sys", "re", "json", "time", "datetime", "date", "timedelta",
+    "collections", "itertools", "functools", "operator", "enum", "typing",
+    "pathlib", "urllib", "http", "html", "xml", "csv", "io", "buffer",
+    "copy", "pickle", "shelve", "sqlite3", "logging", "warnings",
+    "threading", "multiprocessing", "subprocess", "socket", "ssl",
+    "email", "smtplib", "poplib", "imaplib", "uuid", "hashlib",
+    "hmac", "secrets", "base64", "binascii", "struct", "codecs",
+    "argparse", "optparse", "getopt", "configparser",
+    "platform", "sysconfig", "abc", "asyncio", "gc", "weakref",
+    "types", "inspect", "dis", "compileall", "marshal", "code",
+    "ast", "symtable", "tokenize", "keyword", "token", "linecache",
+    "random", "statistics", "math", "cmath", "decimal", "fractions",
+    "numbers", "curses", "textwrap", "string", "unicodedata", "locale",
+    "gettext", "gzip", "bz2", "lzma", "zipfile", "tarfile",
+    "shutil", "glob", "fnmatch", "tempfile", "tempdir", "fileinput",
+    "stat", "filecmp", "select", "poll", "mmap",
+    "heapq", "traceback", "unittest", "atexit", "trace",
+    "pprint", "signal", "contextvars", "dataclasses",
+    "graphlib", "pkgutil", "zipimport", "imp", "importlib",
+    "fractions", "bisect", "array", "copyreg", "dbm", "msvcrt",
+    "grp", "pwd", "termios", "fcntl", "resource", "errno",
+    "exceptions", "builtins", "PrettyTable", "colorsys",
+    "concurrent", "concurrent.futures", "multiprocessing.pool",
+    "queue", "mimetypes", "netrc", "plistlib", "zipfile",
+    "sched", "queue", "ensurepip", "venv", "zipapp",
+    "py_compile", "compile",
+    "tkinter", "Tkinter", "tkinter",
+    "turtle", "formatter",
+}
+
 
 def get_package_info_from_pypi(package_name: str, use_cache: bool = True) -> Optional[dict]:
     """Fetches package information from the PyPI JSON API.
@@ -16,6 +47,10 @@ def get_package_info_from_pypi(package_name: str, use_cache: bool = True) -> Opt
         None if there was an error.
     """
     import requests
+
+    normalized = package_name.lower().replace("-", "_")
+    if normalized in STDLIB_MODULES:
+        return None
 
     if use_cache:
         from .cache import get_cache
@@ -33,8 +68,7 @@ def get_package_info_from_pypi(package_name: str, use_cache: bool = True) -> Opt
             cache.set(package_name, data)
         logger.debug(f"Successfully fetched info for {package_name}")
         return data
-    except requests.exceptions.HTTPError as e:
-        logger.warning(f"Package '{package_name}' not found on PyPI: {e}")
+    except requests.exceptions.HTTPError:
         return None
     except requests.exceptions.RequestException as e:
         logger.error(f"Network error fetching '{package_name}': {e}")
