@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -125,10 +126,15 @@ class AuditDialog(QDialog):
         self.remove_unused_btn.setEnabled(False)
         button_layout.addWidget(self.remove_unused_btn)
 
-        self.add_missing_btn = QPushButton("Add Missing Dependencies")
+        self.add_missing_btn = QPushButton("Add to Requirements")
         self.add_missing_btn.clicked.connect(self._add_missing)
         self.add_missing_btn.setEnabled(False)
         button_layout.addWidget(self.add_missing_btn)
+
+        self.integrate_btn = QPushButton("Full Integration")
+        self.integrate_btn.clicked.connect(self._integrate_all)
+        self.integrate_btn.setEnabled(False)
+        button_layout.addWidget(self.integrate_btn)
 
         button_layout.addStretch()
 
@@ -152,6 +158,7 @@ class AuditDialog(QDialog):
 
         self.remove_unused_btn.setEnabled(len(self.audit_result.unused_dependencies) > 0)
         self.add_missing_btn.setEnabled(len(self.audit_result.missing_dependencies) > 0)
+        self.integrate_btn.setEnabled(len(self.audit_result.missing_dependencies) > 0)
 
     def _remove_unused(self) -> None:
         from .core.dependency_auditor import remove_unused_dependencies
@@ -200,6 +207,48 @@ class AuditDialog(QDialog):
                 self.add_missing_btn.setEnabled(False)
             else:
                 self.text_area.append("\n\nNo requirements.txt found. Cannot add dependencies.")
+
+    def _integrate_all(self) -> None:
+        from .core.dependency_integrator import integrate_missing_dependencies
+
+        if not self.audit_result or not self.audit_result.missing_dependencies:
+            return
+
+        missing = self.audit_result.missing_dependencies
+
+        reply = QMessageBox.question(
+            self,
+            "Full Integration",
+            f"This will:\n1. Install {len(missing)} packages via pip\n2. Add import statements to source files\n3. Add to requirements.txt\n\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.text_area.append("\n\nIntegrating dependencies...")
+
+            results = integrate_missing_dependencies(
+                self.project_path,
+                missing,
+                install=True
+            )
+
+            success_count = sum(1 for r in results if r.success)
+            self.text_area.append(f"\n\nIntegration complete: {success_count}/{len(results)} successful")
+
+            for result in results:
+                status = "OK" if result.success else "FAILED"
+                self.text_area.append(f"  [{status}] {result.package}")
+                if result.installed:
+                    self.text_area.append(f"      Installed: {result.package}")
+                if result.imports_added:
+                    for file_path, _ in result.imports_added:
+                        self.text_area.append(f"      Added import to: {os.path.basename(file_path)}")
+                if result.errors:
+                    for error in result.errors:
+                        self.text_area.append(f"      Error: {error[:80]}")
+
+            self.add_missing_btn.setEnabled(False)
+            self.integrate_btn.setEnabled(False)
 
 
 class MigrationGuideDialog(QDialog):
