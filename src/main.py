@@ -268,6 +268,11 @@ class AuditDialog(QDialog):
                 self.text_area.append(f"\n\nAdded dependencies to {count} file(s):")
                 for f in files:
                     self.text_area.append(f"  • {f}")
+
+                if self.history_manager:
+                    for pkg in missing:
+                        self.history_manager.mark_resolved(pkg, "missing", "added_to_requirements")
+
                 self.add_missing_btn.setEnabled(False)
             else:
                 self.text_area.append("\n\nNo requirements.txt found. Cannot add dependencies.")
@@ -311,7 +316,12 @@ class AuditDialog(QDialog):
                     for error in result.errors:
                         self.text_area.append(f"      Error: {error[:80]}")
 
+                if result.success and self.history_manager:
+                    self.history_manager.mark_resolved(result.package, "missing", "full_integration")
+
             self.add_missing_btn.setEnabled(False)
+            self.integrate_btn.setEnabled(False)
+            self.acknowledge_btn.setEnabled(False)
             self.integrate_btn.setEnabled(False)
 
 
