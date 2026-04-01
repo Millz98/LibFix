@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QMessageBox,
     QTextEdit,
+    QInputDialog,
 )
 import qdarkstyle
 
@@ -109,6 +110,7 @@ class AuditDialog(QDialog):
         self.project_path = project_path
         self.dependencies = dependencies
         self.audit_result = None
+        self.history_manager = None
 
         self.setWindowTitle("Dependency Usage Audit")
         self.setMinimumSize(700, 500)
@@ -136,6 +138,11 @@ class AuditDialog(QDialog):
         self.integrate_btn.setEnabled(False)
         button_layout.addWidget(self.integrate_btn)
 
+        self.acknowledge_btn = QPushButton("Acknowledge...")
+        self.acknowledge_btn.clicked.connect(self._acknowledge_issue)
+        self.acknowledge_btn.setEnabled(False)
+        button_layout.addWidget(self.acknowledge_btn)
+
         button_layout.addStretch()
 
         close_btn = QPushButton("Close")
@@ -148,10 +155,16 @@ class AuditDialog(QDialog):
 
     def _run_audit(self) -> None:
         from .core.dependency_auditor import audit_dependencies, generate_audit_report
+        from .core.audit_history import load_audit_history
 
         self.text_area.append("Scanning project for dependency usage...\n")
 
-        self.audit_result = audit_dependencies(self.project_path, self.dependencies)
+        self.history_manager = load_audit_history(self.project_path)
+        self.audit_result = audit_dependencies(
+            self.project_path,
+            self.dependencies,
+            history_manager=self.history_manager
+        )
 
         report = generate_audit_report(self.audit_result)
         self.text_area.setPlainText(report)
@@ -159,6 +172,10 @@ class AuditDialog(QDialog):
         self.remove_unused_btn.setEnabled(len(self.audit_result.unused_dependencies) > 0)
         self.add_missing_btn.setEnabled(len(self.audit_result.missing_dependencies) > 0)
         self.integrate_btn.setEnabled(len(self.audit_result.missing_dependencies) > 0)
+        self.acknowledge_btn.setEnabled(
+            len(self.audit_result.unused_dependencies) > 0 or
+            len(self.audit_result.missing_dependencies) > 0
+        )
 
     def _remove_unused(self) -> None:
         from .core.dependency_auditor import remove_unused_dependencies
@@ -183,7 +200,9 @@ class AuditDialog(QDialog):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            count, files, skipped = remove_unused_dependencies(self.project_path, unused_safe, safe_only=True)
+            count, files, skipped = remove_unused_dependencies(
+                self.project_path, unused_safe, safe_only=True, history_manager=self.history_manager
+            )
             self.text_area.append(f"\n\nRemoved dependencies from {count} file(s):")
             for f in files:
                 self.text_area.append(f"  • {f}")
@@ -193,6 +212,40 @@ class AuditDialog(QDialog):
                     self.text_area.append(f"  • {s}")
 
             self.remove_unused_btn.setEnabled(False)
+            self.acknowledge_btn.setEnabled(False)
+
+    def _acknowledge_issue(self) -> None:
+        if not self.history_manager:
+            return
+
+        unused = [dep.package_name for dep in self.audit_result.unused_dependencies] if self.audit_result else []
+        missing = [pkg for pkg, _ in self.audit_result.missing_dependencies] if self.audit_result else []
+
+        all_items = [(f"unused: {p}", p, "unused") for p in unused]
+        all_items += [(f"missing: {p}", p, "missing") for p in missing]
+
+        if not all_items:
+            return
+
+        msg = "Select an issue to acknowledge (mark as 'will not fix'):\n\n"
+        msg += "\n".join([f"{i+1}. {item[0]}" for i, item in enumerate(all_items)])
+        msg += "\n\nEnter number (or 0 to cancel):"
+
+        num, ok = QInputDialog.getInt(self, "Acknowledge Issue", msg, 0, 0, len(all_items))
+        if not ok or num == 0:
+            return
+
+        _, pkg_name, issue_type = all_items[num - 1]
+        reason, reason_ok = QInputDialog.getText(self, "Acknowledge Issue", "Reason (optional):")
+        if not reason_ok:
+            reason = ""
+
+        self.history_manager.acknowledge(pkg_name, issue_type, reason)
+        self.text_area.append(f"\nAcknowledged: {issue_type}: {pkg_name}")
+        if reason:
+            self.text_area.append(f"  Reason: {reason}")
+
+        self._run_audit()
 
     def _add_missing(self) -> None:
         from .core.dependency_auditor import add_missing_dependencies

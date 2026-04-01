@@ -23,6 +23,9 @@ class AuditResult:
     missing_dependencies: list[tuple[str, list[str]]]
     all_dependencies: list[UsageResult]
     summary: str
+    resolved_count: int = 0
+    acknowledged_count: int = 0
+    is_re_audit: bool = False
 
 
 KNOWN_STANDARD_LIB: set[str] = {
@@ -284,7 +287,8 @@ def audit_dependencies(
     project_path: str,
     dependencies: list[str],
     known_optional: Optional[list[str]] = None,
-    project_name: Optional[str] = None
+    project_name: Optional[str] = None,
+    history_manager=None
 ) -> AuditResult:
     """Audit dependencies against actual usage in the project.
 
@@ -293,12 +297,24 @@ def audit_dependencies(
         dependencies: List of dependency strings (e.g., "requests>=2.28").
         known_optional: List of optional dependency names.
         project_name: Name of the project (to exclude from missing deps).
+        history_manager: Optional AuditHistoryManager for tracking resolved issues.
 
     Returns:
         AuditResult with unused, missing, and all dependencies.
     """
     known_optional = known_optional or []
     imports = scan_imports(project_path)
+
+    is_re_audit = False
+    resolved_count = 0
+    acknowledged_count = 0
+
+    if history_manager:
+        history_manager.record_audit()
+        history_summary = history_manager.get_summary()
+        is_re_audit = history_summary["total_audits"] > 1
+        resolved_count = history_summary["total_resolved"]
+        acknowledged_count = history_summary["total_acknowledged"]
 
     dep_results: list[UsageResult] = []
     unused: list[UsageResult] = []
@@ -377,10 +393,40 @@ def audit_dependencies(
         files = [line[0] for line in lines]
         missing.append((imp_name, files))
 
+    if history_manager:
+        filtered_unused = []
+        for u in unused:
+            if not (history_manager.is_resolved(u.package_name, "unused") or
+                    history_manager.is_acknowledged(u.package_name, "unused")):
+                filtered_unused.append(u)
+            else:
+                resolved_count += 1
+        unused = filtered_unused
+
+        filtered_missing = []
+        for pkg, files in missing:
+            if not (history_manager.is_resolved(pkg, "missing") or
+                    history_manager.is_acknowledged(pkg, "missing")):
+                filtered_missing.append((pkg, files))
+            else:
+                acknowledged_count += 1
+        missing = filtered_missing
+
     unused_safe = [u for u in unused if u.confidence == "high"]
     unused_uncertain = [u for u in unused if u.confidence != "high"]
 
-    unused_summary = f"{len(unused)} unused ({len(unused_safe)} safe to remove, {len(unused_uncertain)} uncertain)" if unused else "All dependencies used"
+    if is_re_audit:
+        prev_resolved = resolved_count + acknowledged_count
+        lines_summary = []
+        if prev_resolved > 0:
+            lines_summary.append(f"{prev_resolved} previously resolved")
+        unused_summary = f"{len(unused)} unused ({len(unused_safe)} safe to remove, {len(unused_uncertain)} uncertain)" if unused else "All dependencies used"
+        if lines_summary:
+            lines_summary.append(unused_summary)
+            unused_summary = ", ".join(lines_summary)
+    else:
+        unused_summary = f"{len(unused)} unused ({len(unused_safe)} safe to remove, {len(unused_uncertain)} uncertain)" if unused else "All dependencies used"
+
     missing_summary = f"{len(missing)} missing" if missing else "No missing dependencies"
 
     summary = f"Audit complete: {unused_summary}, {missing_summary}"
@@ -390,6 +436,9 @@ def audit_dependencies(
         missing_dependencies=missing,
         all_dependencies=dep_results,
         summary=summary,
+        resolved_count=resolved_count,
+        acknowledged_count=acknowledged_count,
+        is_re_audit=is_re_audit,
     )
 
 
@@ -405,6 +454,14 @@ def generate_audit_report(result: AuditResult) -> str:
     lines.append("=" * 50)
     lines.append("DEPENDENCY USAGE AUDIT REPORT")
     lines.append("=" * 50)
+
+    if result.is_re_audit:
+        total_handled = result.resolved_count + result.acknowledged_count
+        lines.append(f"\n[Re-audit: {total_handled} issues previously handled]")
+        if result.resolved_count > 0:
+            lines.append(f"  - {result.resolved_count} resolved")
+        if result.acknowledged_count > 0:
+            lines.append(f"  - {result.acknowledged_count} acknowledged")
 
     unused_safe = [u for u in result.unused_dependencies if u.confidence == "high"]
     unused_uncertain = [u for u in result.unused_dependencies if u.confidence != "high"]
@@ -448,7 +505,8 @@ def remove_unused_dependencies(
     project_path: str,
     unused_dependencies: list[str],
     create_backup: bool = True,
-    safe_only: bool = True
+    safe_only: bool = True,
+    history_manager=None
 ) -> tuple[int, list[str], list[str]]:
     """Remove unused dependencies from project files.
 
@@ -457,6 +515,7 @@ def remove_unused_dependencies(
         unused_dependencies: List of package names to remove.
         create_backup: Whether to create backup files.
         safe_only: Only remove dependencies marked as safe (confidence='high').
+        history_manager: Optional AuditHistoryManager to record removals.
 
     Returns:
         Tuple of (files modified count, list of modified files, list of skipped).
@@ -522,6 +581,10 @@ def remove_unused_dependencies(
 
             except (OSError, UnicodeDecodeError) as e:
                 logger.error(f"Error updating {file_path}: {e}")
+
+    if history_manager and unused_dependencies:
+        for dep in unused_dependencies:
+            history_manager.mark_resolved(dep, "unused", "removed", modified_files)
 
     return len(modified_files), modified_files, skipped
 
