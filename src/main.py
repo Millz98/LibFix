@@ -357,7 +357,6 @@ class AuditDialog(QDialog):
         self.integrate_btn.setEnabled(False)
         self.acknowledge_btn.setEnabled(False)
         self.remove_unused_btn.setEnabled(False)
-            self.integrate_btn.setEnabled(False)
 
 
 class MigrationGuideDialog(QDialog):
