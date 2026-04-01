@@ -279,20 +279,41 @@ class AuditDialog(QDialog):
 
     def _integrate_all(self) -> None:
         from .core.dependency_integrator import integrate_missing_dependencies
+        from .core.dependency_auditor import remove_unused_dependencies
 
-        if not self.audit_result or not self.audit_result.missing_dependencies:
+        if not self.audit_result:
             return
 
         missing = self.audit_result.missing_dependencies
+        unused_safe = [dep.package_name for dep in self.audit_result.unused_dependencies if dep.confidence == "high"]
+        unused_uncertain = [dep.package_name for dep in self.audit_result.unused_dependencies if dep.confidence != "high"]
+
+        if not missing and not unused_safe:
+            self.text_area.append("\n\nNothing to integrate or remove.")
+            return
+
+        msg_parts = []
+        if missing:
+            msg_parts.append(f"1. Install {len(missing)} missing packages via pip")
+            msg_parts.append(f"2. Add import statements to source files")
+            msg_parts.append(f"3. Add to requirements.txt")
+        if unused_safe:
+            msg_parts.append(f"\n4. Remove {len(unused_safe)} unused packages (SAFE)")
+            msg_parts.append(f"   {', '.join(unused_safe[:3])}{'...' if len(unused_safe) > 3 else ''}")
+        if unused_uncertain:
+            msg_parts.append(f"\nNote: {len(unused_uncertain)} uncertain deps will be skipped")
 
         reply = QMessageBox.question(
             self,
             "Full Integration",
-            f"This will:\n1. Install {len(missing)} packages via pip\n2. Add import statements to source files\n3. Add to requirements.txt\n\nContinue?",
+            "\n".join(msg_parts) + "\n\nContinue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if missing:
             self.text_area.append("\n\nIntegrating dependencies...")
 
             results = integrate_missing_dependencies(
@@ -302,7 +323,7 @@ class AuditDialog(QDialog):
             )
 
             success_count = sum(1 for r in results if r.success)
-            self.text_area.append(f"\n\nIntegration complete: {success_count}/{len(results)} successful")
+            self.text_area.append(f"\nIntegration complete: {success_count}/{len(results)} successful")
 
             for result in results:
                 status = "OK" if result.success else "FAILED"
@@ -319,9 +340,23 @@ class AuditDialog(QDialog):
                 if result.success and self.history_manager:
                     self.history_manager.mark_resolved(result.package, "missing", "full_integration")
 
-            self.add_missing_btn.setEnabled(False)
-            self.integrate_btn.setEnabled(False)
-            self.acknowledge_btn.setEnabled(False)
+        if unused_safe:
+            self.text_area.append("\n\nRemoving unused dependencies...")
+
+            count, files, skipped = remove_unused_dependencies(
+                self.project_path, unused_safe, safe_only=True, history_manager=self.history_manager
+            )
+
+            self.text_area.append(f"\nRemoved from {count} file(s):")
+            for f in files:
+                self.text_area.append(f"  • {os.path.basename(f)}")
+            if skipped:
+                self.text_area.append(f"\nSkipped {len(skipped)} uncertain dependencies")
+
+        self.add_missing_btn.setEnabled(False)
+        self.integrate_btn.setEnabled(False)
+        self.acknowledge_btn.setEnabled(False)
+        self.remove_unused_btn.setEnabled(False)
             self.integrate_btn.setEnabled(False)
 
 
