@@ -9,6 +9,37 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+STDLIB_MODULES = {
+    "os", "sys", "re", "json", "time", "datetime", "date", "timedelta",
+    "collections", "itertools", "functools", "operator", "enum", "typing",
+    "pathlib", "urllib", "http", "html", "xml", "csv", "io", "buffer",
+    "copy", "pickle", "shelve", "sqlite3", "logging", "warnings",
+    "threading", "multiprocessing", "subprocess", "socket", "ssl",
+    "email", "smtplib", "poplib", "imaplib", "uuid", "hashlib",
+    "hmac", "secrets", "base64", "binascii", "struct", "codecs",
+    "argparse", "optparse", "getopt", "configparser",
+    "platform", "sysconfig", "abc", "asyncio", "gc", "weakref",
+    "types", "inspect", "dis", "compileall", "marshal", "code",
+    "ast", "symtable", "tokenize", "keyword", "token", "linecache",
+    "random", "statistics", "math", "cmath", "decimal", "fractions",
+    "numbers", "curses", "textwrap", "string", "unicodedata", "locale",
+    "gettext", "gzip", "bz2", "lzma", "zipfile", "tarfile",
+    "shutil", "glob", "fnmatch", "tempfile", "tempdir", "fileinput",
+    "stat", "filecmp", "select", "poll", "mmap",
+    "heapq", "traceback", "unittest", "atexit", "trace",
+    "pprint", "signal", "contextvars", "dataclasses",
+    "graphlib", "pkgutil", "zipimport", "imp", "importlib",
+    "fractions", "bisect", "array", "copyreg", "dbm", "msvcrt",
+    "grp", "pwd", "termios", "fcntl", "resource", "errno",
+    "exceptions", "Builtins", "PrettyTable", "colorsys",
+    "concurrent", "concurrent.futures", "multiprocessing.pool",
+    "queue", "mimetypes", "netrc", "plistlib", "zipfile",
+    "sched", "queue", "ensurepip", "venv", "zipapp",
+    "py_compile", "compile", "py_compile",
+    "tkinter", "Tkinter", "tkinter",
+    "turtle", "formatter",
+}
+
 
 def is_on_pypi(package_name: str) -> bool:
     """Check if a package exists on PyPI.
@@ -19,6 +50,10 @@ def is_on_pypi(package_name: str) -> bool:
     Returns:
         True if the package exists on PyPI, False otherwise.
     """
+    normalized = package_name.lower().replace("-", "_")
+    if normalized in STDLIB_MODULES:
+        return False
+
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "index", "versions", package_name],

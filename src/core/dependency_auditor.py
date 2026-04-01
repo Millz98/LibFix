@@ -55,6 +55,10 @@ KNOWN_STANDARD_LIB: set[str] = {
     "queue", "mimetypes", "netrc", "plistlib", "zipfile",
     "sched", "queue", "ensurepip", "venv", "zipapp",
     "pkg_resources", "setuptools", "distutils",
+    "py_compile", "compile", "py_compile",
+    "tkinter", "Tkinter", "tkinter",
+    "turtle", "formatter", "antigravity",
+    "cgi", "cgihost", " turtledemo",
 }
 
 PACKAGE_ALIASES: dict[str, str] = {
