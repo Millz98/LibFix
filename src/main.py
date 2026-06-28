@@ -567,6 +567,7 @@ class MainWindow(QMainWindow):
         self.dep_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.dep_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.dep_table.setAlternatingRowColors(True)
+        self.dep_table.verticalHeader().setVisible(False)
         self.dep_table.setStyleSheet(
             "QTableWidget { border: none; gridline-color: #333; } "
             "QTableWidget::item { padding: 4px; } "
@@ -581,23 +582,20 @@ class MainWindow(QMainWindow):
         splitter.addWidget(table_container)
 
         # Details panel
-        details_group = QGroupBox("Details")
-        details_group.setStyleSheet(
-            "QGroupBox { font-weight: bold; border: 1px solid #444; border-radius: 4px; margin-top: 4px; padding-top: 12px; } "
-            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+        details_header = QLabel("  Details")
+        details_header.setStyleSheet(
+            "QLabel { font-weight: bold; font-size: 12px; color: #aaa; padding: 4px 8px; "
+            "border-bottom: 1px solid #444; }"
         )
-        details_layout = QVBoxLayout(details_group)
+        main_layout.addWidget(details_header)
+
         self.details_text = QTextEdit()
         self.details_text.setReadOnly(True)
         self.details_text.setMaximumHeight(150)
         self.details_text.setStyleSheet(
-            "QTextEdit { border: none; background: transparent; font-size: 12px; }"
+            "QTextEdit { border: none; background: transparent; font-size: 12px; padding: 4px 8px; }"
         )
-        details_layout.addWidget(self.details_text)
-        splitter.addWidget(details_group)
-        splitter.setSizes([500, 150])
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
+        main_layout.addWidget(self.details_text)
 
         main_layout.addWidget(splitter)
 
