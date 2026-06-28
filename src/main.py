@@ -508,6 +508,9 @@ class MainWindow(QMainWindow):
         self.central_widget.setLayout(self.layout)
 
         self.project_directory: Optional[str] = None
+        self.fetcher_thread: Optional[DependencyFetcherThread] = None
+        self.replacement_thread: Optional[ReplacementThread] = None
+        self.selected_item_data: Optional[tuple] = None
 
         if initial_project:
             self.project_directory = initial_project
@@ -515,9 +518,6 @@ class MainWindow(QMainWindow):
             self.find_and_parse_dependencies()
         self.python_interpreter_path = get_python_interpreter_path()
         self.dependencies_with_info: dict[str, Optional[dict]] = {}
-        self.fetcher_thread: Optional[DependencyFetcherThread] = None
-        self.replacement_thread: Optional[ReplacementThread] = None
-        self.selected_item_data: Optional[tuple] = None
 
         logger.info(f"LibFix started with Python: {self.python_interpreter_path}")
 
