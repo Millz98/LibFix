@@ -4,13 +4,13 @@ import tempfile
 from src.core.dependency_auditor import (
     scan_imports,
     audit_dependencies,
-    _extract_package_name,
     _normalize_package_name,
     KNOWN_STANDARD_LIB,
     PACKAGE_ALIASES,
     remove_unused_dependencies,
     add_missing_dependencies,
 )
+from src.utils.dep_utils import extract_package_name as _extract_package_name
 
 
 class TestDependencyAuditor:

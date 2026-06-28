@@ -7,6 +7,19 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "MigrationHint",
+    "MigrationGuide",
+    "ReplacementPattern",
+    "MIGRATION_GUIDES",
+    "get_migration_guide",
+    "get_replacement_patterns",
+    "scan_for_usages",
+    "auto_replace_usages",
+    "preview_replacement",
+    "generate_migration_summary",
+]
+
 
 @dataclass
 class MigrationHint:
@@ -319,13 +332,65 @@ def _get_default_patterns(package_name: str) -> list[ReplacementPattern]:
     ]
 
 
-def auto_replace_usages(project_path: str, old_package: str, new_package: str) -> tuple[int, list[str]]:
+def preview_replacement(project_path: str, old_package: str, new_package: str) -> list[dict]:
+    """Preview what changes would be made without applying them.
+
+    Returns:
+        A list of dicts with 'file_path', 'changes' (list of (old_line, new_line) tuples).
+    """
+    hints = scan_for_usages(project_path, old_package)
+    files_by_path: dict[str, list[MigrationHint]] = {}
+
+    for hint in hints:
+        if hint.file_path not in files_by_path:
+            files_by_path[hint.file_path] = []
+        files_by_path[hint.file_path].append(hint)
+
+    previews: list[dict] = []
+    for file_path, file_hints in files_by_path.items():
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        changes: list[tuple[str, str]] = []
+        modified_content = content
+
+        for hint in file_hints:
+            if hint.old_pattern in modified_content:
+                modified_content = modified_content.replace(hint.old_pattern, hint.new_pattern)
+                changes.append((hint.old_pattern, hint.new_pattern))
+
+        if changes:
+            # Generate line-level diff
+            import difflib
+            original_lines = content.splitlines(keepends=True)
+            modified_lines = modified_content.splitlines(keepends=True)
+            diff = list(difflib.unified_diff(
+                original_lines,
+                modified_lines,
+                fromfile=f"a/{os.path.basename(file_path)}",
+                tofile=f"b/{os.path.basename(file_path)}",
+                n=1,
+            ))
+            previews.append({
+                'file_path': file_path,
+                'changes': changes,
+                'diff': diff,
+            })
+
+    return previews
+
+
+def auto_replace_usages(project_path: str, old_package: str, new_package: str, dry_run: bool = False) -> tuple[int, list[str]]:
     """Automatically replace package usages in all Python files.
 
     Args:
         project_path: Path to the project.
         old_package: The old package name.
         new_package: The new package name.
+        dry_run: If True, only preview changes without writing files.
 
     Returns:
         A tuple of (number of files modified, list of modified file paths).
@@ -341,7 +406,8 @@ def auto_replace_usages(project_path: str, old_package: str, new_package: str) -
 
     for file_path, file_hints in files_by_path.items():
         try:
-            shutil.copy2(file_path, f"{file_path}.bak")
+            if not dry_run:
+                shutil.copy2(file_path, f"{file_path}.bak")
 
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -355,8 +421,9 @@ def auto_replace_usages(project_path: str, old_package: str, new_package: str) -
                     changes_made.append(f"{hint.old_pattern} → {hint.new_pattern}")
 
             if content != original_content:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(content)
+                if not dry_run:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
                 modified_files.append(file_path)
                 logger.info(f"Updated {len(changes_made)} patterns in {file_path}")
 

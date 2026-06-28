@@ -3,6 +3,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "find_alternatives",
+    "add_replacement",
+    "get_all_replacements",
+    "COMMON_REPLACEMENTS",
+    "ALTERNATIVES_CACHE",
+]
+
 ALTERNATIVES_CACHE: dict[str, list[str]] = {}
 
 COMMON_REPLACEMENTS: dict[str, list[str]] = {
@@ -22,7 +30,6 @@ COMMON_REPLACEMENTS: dict[str, list[str]] = {
     "boto3": ["aioboto3"],
     "aiohttp": ["httpx", "aiofiles"],
     "ujson": ["orjson", "msgspec"],
-    "ujson": ["orjson"],
     "flask-cors": ["flask[crossdomain]"],
     "django-cors-headers": ["django-cors-headers"],
     "python-dateutil": ["ciso8601", "pendulum"],
@@ -32,7 +39,6 @@ COMMON_REPLACEMENTS: dict[str, list[str]] = {
     "redis-py": ["redis"],
     "mysql-connector-python": ["pymysql", "aiomysql"],
     "psycopg2": ["psycopg[binary]", "asyncpg"],
-    "ujson": ["orjson", "msgspec"],
     "yaml": ["ruamel.yaml"],
     "simplejson": ["orjson"],
     "requests-oauthlib": ["authlib"],

@@ -3,6 +3,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "is_potentially_inactive",
+    "set_threshold",
+    "INACTIVITY_THRESHOLD_YEARS",
+]
+
 INACTIVITY_THRESHOLD_YEARS: float = 2.0
 
 

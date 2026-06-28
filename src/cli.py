@@ -2,12 +2,16 @@ import argparse
 import logging
 import sys
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .core.dependency_finder import find_dependency_files
 from .core.dependency_parser import parse_all
 from .core.pypi_utils import get_package_info_from_pypi, clear_cache
 from .core.dependency_analyzer import is_potentially_inactive, INACTIVITY_THRESHOLD_YEARS
+from .core.dependency_auditor import audit_dependencies, generate_audit_report
+from .core.audit_history import load_audit_history
+from .utils.dep_utils import extract_package_name
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -48,8 +52,8 @@ def analyze_project(project_path: str, threshold: float, output_format: str, sho
 
     logger.info(f"Analyzing {len(all_dependencies)} dependencies...")
 
-    for dep in sorted(all_dependencies):
-        package_name = _extract_package_name(dep)
+    def _analyze_one(dep: str) -> dict:
+        package_name = extract_package_name(dep)
         info = get_package_info_from_pypi(package_name)
 
         result = {
@@ -71,15 +75,18 @@ def analyze_project(project_path: str, threshold: float, output_format: str, sho
             result['reason'] = reason
             result['alternatives'] = alternatives
 
-        if show_all or result['inactive']:
-            results.append(result)
+        return result
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_analyze_one, dep): dep for dep in all_dependencies}
+        for future in as_completed(futures):
+            result = future.result()
+            if show_all or result['inactive']:
+                results.append(result)
+
+    results.sort(key=lambda r: r['dependency'])
 
     return results
-
-
-def _extract_package_name(dependency_string: str) -> str:
-    parts = dependency_string.split('>', 1)[0].split('<', 1)[0].split('=', 1)[0].split('!', 1)[0]
-    return parts.strip()
 
 
 def print_results(results: list[dict], output_format: str) -> None:
@@ -111,6 +118,8 @@ Examples:
   libfix analyze /path/to/project
   libfix analyze . --output json
   libfix analyze . --show-all --output compact
+  libfix audit /path/to/project
+  libfix audit . --output json
   libfix cache clear
         """
     )
@@ -126,6 +135,11 @@ Examples:
     analyze_parser.add_argument('-a', '--show-all', action='store_true',
                                 help='Show all packages, not just inactive ones')
     analyze_parser.add_argument('-q', '--quiet', action='store_true', help='Suppress non-error output')
+
+    audit_parser = subparsers.add_parser('audit', help='Audit dependency usage in a project')
+    audit_parser.add_argument('project', nargs='?', default='.', help='Project directory (default: .)')
+    audit_parser.add_argument('-o', '--output', choices=['text', 'json'], default='text',
+                               help='Output format (default: text)')
 
     cache_parser = subparsers.add_parser('cache', help='Manage cache')
     cache_parser.add_argument('action', choices=['clear', 'info'], help='Cache action')
@@ -147,6 +161,44 @@ Examples:
             print(f"Cache directory: {cache.cache_dir}")
             print(f"Cached packages: {len(cache_files)}")
             return 0
+
+    if args.command == 'audit':
+        project_path = args.project
+        dependency_files = find_dependency_files(project_path)
+        all_deps: list[str] = []
+        for file_type, files in dependency_files.items():
+            for file_path in files:
+                all_deps.extend(parse_all(file_path))
+        all_deps = sorted(set(all_deps))
+
+        if not all_deps:
+            print("No dependencies found")
+            return 0
+
+        history_manager = load_audit_history(project_path)
+        audit_result = audit_dependencies(
+            project_path,
+            all_deps,
+            history_manager=history_manager,
+        )
+
+        output_format = getattr(args, 'output', 'text')
+        if output_format == 'json':
+            result_dict = {
+                'summary': audit_result.summary,
+                'unused': [
+                    {'package': u.package_name, 'confidence': u.confidence, 'usage': u.usage_type}
+                    for u in audit_result.unused_dependencies
+                ],
+                'missing': [
+                    {'package': pkg, 'files': files}
+                    for pkg, files in audit_result.missing_dependencies
+                ],
+            }
+            print(json.dumps(result_dict, indent=2))
+        else:
+            print(generate_audit_report(audit_result))
+        return 0
 
     if args.command == 'analyze' or args.command is None:
         if args.command is None:

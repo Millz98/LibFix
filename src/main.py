@@ -30,6 +30,7 @@ from .core.dependency_parser import parse_all
 from .core.pypi_utils import get_package_info_from_pypi
 from .core.dependency_analyzer import is_potentially_inactive
 from .core.dependency_replacer import replace_dependency
+from .utils.dep_utils import extract_package_name
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +47,11 @@ class DependencyFetcherThread(QThread):
         deps_with_info: dict[str, Optional[dict]] = {}
         total = len(self.dependencies)
         for i, dep in enumerate(self.dependencies):
-            package_name = self._extract_package_name(dep)
+            package_name = extract_package_name(dep)
             info = get_package_info_from_pypi(package_name)
             deps_with_info[dep] = info
             self.progress_signal.emit(i + 1, total)
         self.finished_signal.emit(deps_with_info)
-
-    @staticmethod
-    def _extract_package_name(dependency_string: str) -> str:
-        parts = dependency_string.split('>', 1)[0].split('<', 1)[0].split('=', 1)[0].split('!', 1)[0]
-        return parts.strip()
 
 
 class ReplacementThread(QThread):
@@ -380,6 +376,10 @@ class MigrationGuideDialog(QDialog):
 
         button_layout = QHBoxLayout()
 
+        self.preview_btn = QPushButton("Preview Changes")
+        self.preview_btn.clicked.connect(self._on_preview_changes)
+        button_layout.addWidget(self.preview_btn)
+
         self.auto_replace_btn = QPushButton("Auto-Replace Imports")
         self.auto_replace_btn.clicked.connect(self._on_auto_replace)
         button_layout.addWidget(self.auto_replace_btn)
@@ -399,6 +399,15 @@ class MigrationGuideDialog(QDialog):
     def _on_auto_replace(self) -> None:
         from .core.migration_guide import auto_replace_usages
 
+        reply = QMessageBox.question(
+            self,
+            "Confirm Replacement",
+            "Apply changes to source files?\n\nA backup (.bak) will be created before modifying.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
         count, files = auto_replace_usages(self.project_path, self.old_package, self.new_package)
 
         if count > 0:
@@ -410,6 +419,30 @@ class MigrationGuideDialog(QDialog):
             self.auto_replace_btn.setText("Imports Replaced")
         else:
             self.text_area.append("\n\nNo imports to replace.")
+
+    def _on_preview_changes(self) -> None:
+        from .core.migration_guide import preview_replacement
+
+        previews = preview_replacement(self.project_path, self.old_package, self.new_package)
+
+        if not previews:
+            self.text_area.append("\n\nNo changes to preview.")
+            return
+
+        total_files = len(previews)
+        total_changes = sum(len(p['changes']) for p in previews)
+        self.text_area.append(f"\n\nPreview: {total_changes} change(s) in {total_files} file(s):\n")
+
+        for preview in previews:
+            self.text_area.append(f"--- {preview['file_path']} ---")
+            for line in preview['diff']:
+                if line.startswith('+') and not line.startswith('+++'):
+                    self.text_area.append(f"  [ADD] {line.rstrip()}")
+                elif line.startswith('-') and not line.startswith('---'):
+                    self.text_area.append(f"  [DEL] {line.rstrip()}")
+                elif line.startswith('@@'):
+                    self.text_area.append(f"  {line.rstrip()}")
+            self.text_area.append("")
 
     def was_replacement_made(self) -> bool:
         return self.replacements_made
@@ -545,7 +578,7 @@ class MainWindow(QMainWindow):
     def _get_inactive_deps(self) -> dict[str, tuple[bool, list[str]]]:
         inactive_deps: dict[str, tuple[bool, list[str]]] = {}
         for dep, info in self.dependencies_with_info.items():
-            package_name = self._extract_package_name(dep)
+            package_name = extract_package_name(dep)
             if info and 'info' in info:
                 inactive, _, alts = is_potentially_inactive(info, package_name)
                 if inactive:
@@ -573,7 +606,7 @@ class MainWindow(QMainWindow):
             reason = ""
             alternatives: list[str] = []
 
-            package_name = self._extract_package_name(dep)
+            package_name = extract_package_name(dep)
 
             if info and 'info' in info and 'version' in info['info']:
                 latest_version = info['info']['version']
@@ -643,7 +676,7 @@ class MainWindow(QMainWindow):
         should_rescan = False
 
         if selected_new and old_dep and self.project_directory:
-            old_name = self._extract_package_name(old_dep)
+            old_name = extract_package_name(old_dep)
             try:
                 guide_dialog = MigrationGuideDialog(
                     self, old_name, selected_new, self.project_directory
@@ -676,10 +709,6 @@ class MainWindow(QMainWindow):
                 self.find_and_parse_dependencies()
             else:
                 self.status_label.setText("")
-
-    def _extract_package_name(self, dependency_string: str) -> str:
-        parts = dependency_string.split('>', 1)[0].split('<', 1)[0].split('=', 1)[0].split('!', 1)[0]
-        return parts.strip()
 
 
 def main() -> None:

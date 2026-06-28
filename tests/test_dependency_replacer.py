@@ -3,10 +3,10 @@ import tempfile
 import os
 from src.core.dependency_replacer import (
     replace_dependency,
-    _extract_package_name,
     _replace_in_text,
     _replace_in_toml,
 )
+from src.utils.dep_utils import extract_package_name as _extract_package_name
 
 
 class TestDependencyReplacer:

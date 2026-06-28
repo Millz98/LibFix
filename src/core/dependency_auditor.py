@@ -4,7 +4,22 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ..utils.dep_utils import extract_package_name
+
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "UsageResult",
+    "AuditResult",
+    "scan_imports",
+    "audit_dependencies",
+    "generate_audit_report",
+    "remove_unused_dependencies",
+    "add_missing_dependencies",
+    "KNOWN_STANDARD_LIB",
+    "PACKAGE_ALIASES",
+    "DYNAMIC_IMPORT_PATTERNS",
+]
 
 
 @dataclass
@@ -48,17 +63,17 @@ KNOWN_STANDARD_LIB: set[str] = {
     "heapq", "traceback", "unittest", "atexit", "trace",
     "pprint", "signal", "contextvars", "dataclasses",
     "graphlib", "pkgutil", "zipimport", "imp", "importlib",
-    "fractions", "bisect", "array", "copyreg", "dbm", "msvcrt",
+    "bisect", "array", "copyreg", "dbm", "msvcrt",
     "grp", "pwd", "termios", "fcntl", "resource", "errno",
-    "exceptions", "Builtins", "PrettyTable", "colorsys",
+    "exceptions", "builtins", "PrettyTable", "colorsys",
     "concurrent", "concurrent.futures", "multiprocessing.pool",
-    "queue", "mimetypes", "netrc", "plistlib", "zipfile",
-    "sched", "queue", "ensurepip", "venv", "zipapp",
+    "queue", "mimetypes", "netrc", "plistlib",
+    "sched", "ensurepip", "venv", "zipapp",
     "pkg_resources", "setuptools", "distutils",
-    "py_compile", "compile", "py_compile",
-    "tkinter", "Tkinter", "tkinter",
+    "py_compile", "compile",
+    "tkinter", "Tkinter",
     "turtle", "formatter", "antigravity",
-    "cgi", "cgihost", " turtledemo",
+    "cgi", "cgihost", "turtledemo",
 }
 
 PACKAGE_ALIASES: dict[str, str] = {
@@ -67,15 +82,12 @@ PACKAGE_ALIASES: dict[str, str] = {
     "pil": "pillow",
     "cv2": "opencv-python",
     "cv": "opencv-python",
-    "tensorflow": "tf",
     "tf": "tensorflow",
     "np": "numpy",
     "pd": "pandas",
     "plt": "matplotlib",
     "sns": "seaborn",
-    "pd": "pandas",
     "torch": "pytorch",
-    "keras": "keras",
     "sk": "scikit-learn",
     "sp": "scipy",
     "sc": "scipy",
@@ -85,9 +97,7 @@ PACKAGE_ALIASES: dict[str, str] = {
     "yml": "pyyaml",
     "ftfy": "ftfy",
     "uj": "ujson",
-    "ujson": "ujson",
     "simplejson": "simplejson",
-    "sqlalchemy": "sqlalchemy",
     "psycopg2": "psycopg2-binary",
     "pg2": "psycopg2-binary",
 }
@@ -221,11 +231,18 @@ def _normalize_package_name(name: str) -> str:
 
 
 def _check_dependency_safety(
-    project_path: str,
+    file_contents_cache: dict[str, str],
     package_name: str,
-    pkg_normalized: str
+    pkg_normalized: str,
+    project_path: str,
 ) -> tuple[str, list[str]]:
     """Check if a dependency is used in potentially dynamic ways.
+
+    Args:
+        file_contents_cache: Dict mapping file_path -> content for all scanned files.
+        package_name: The package name being checked.
+        pkg_normalized: Normalized (lowercase, underscores) package name.
+        project_path: Path to the project (for relative path computation).
 
     Returns:
         Tuple of (confidence_level, list of usage_types).
@@ -233,53 +250,41 @@ def _check_dependency_safety(
     usage_types = []
     confidence = "high"
 
-    for root, _, files in os.walk(project_path):
-        if any(skip in root for skip in ["venv", "__pycache__", ".git", ".venv"]):
-            continue
+    for file_path, content in file_contents_cache.items():
+        rel_path = os.path.relpath(file_path, project_path)
 
-        for file in files:
-            file_path = os.path.join(root, file)
-            rel_path = os.path.relpath(file_path, project_path)
+        if pkg_normalized in content.lower():
+            if file_path.endswith(".py"):
+                for pattern, ptype in DYNAMIC_IMPORT_PATTERNS:
+                    if re.search(pattern, content, re.IGNORECASE):
+                        if ptype not in usage_types:
+                            usage_types.append(ptype)
+                        confidence = "low"
 
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
+            for pattern, ptype in ENTRY_POINT_PATTERNS:
+                if re.search(pattern, content, re.IGNORECASE):
+                    if ptype not in usage_types:
+                        usage_types.append(ptype)
 
-                if pkg_normalized in content.lower():
-                    if file.endswith(".py"):
-                        for pattern, ptype in DYNAMIC_IMPORT_PATTERNS:
-                            if re.search(pattern, content, re.IGNORECASE):
-                                if ptype not in usage_types:
-                                    usage_types.append(ptype)
-                                confidence = "low"
+            for pattern, ptype in PLUGIN_PATTERNS:
+                if re.search(pattern, content, re.IGNORECASE):
+                    if ptype not in usage_types:
+                        usage_types.append(ptype)
 
-                    for pattern, ptype in ENTRY_POINT_PATTERNS:
-                        if re.search(pattern, content, re.IGNORECASE):
-                            if ptype not in usage_types:
-                                usage_types.append(ptype)
+            if "pytest" in rel_path or "test_" in file_path or file_path.endswith("_test.py"):
+                if "test" not in usage_types:
+                    usage_types.append("test usage")
+                confidence = "medium"
 
-                    for pattern, ptype in PLUGIN_PATTERNS:
-                        if re.search(pattern, content, re.IGNORECASE):
-                            if ptype not in usage_types:
-                                usage_types.append(ptype)
+            if "setup.py" in file_path or file_path.endswith("pyproject.toml"):
+                if "setup" not in usage_types:
+                    usage_types.append("setup/dependency")
+                confidence = "medium"
 
-                    if "pytest" in rel_path or "test_" in file or "_test.py" in file:
-                        if "test" not in usage_types:
-                            usage_types.append("test usage")
-                        confidence = "medium"
-
-                    if "setup.py" in file or "pyproject.toml" in file:
-                        if "setup" not in usage_types:
-                            usage_types.append("setup/dependency")
-                        confidence = "medium"
-
-                    if any(x in rel_path for x in ["examples", "demo", "scripts"]):
-                        if "example" not in usage_types:
-                            usage_types.append("example/demo script")
-                        confidence = "medium"
-
-            except (OSError, UnicodeDecodeError):
-                continue
+            if any(x in rel_path for x in ["examples", "demo", "scripts"]):
+                if "example" not in usage_types:
+                    usage_types.append("example/demo script")
+                confidence = "medium"
 
     if not usage_types:
         usage_types.append("static import only")
@@ -309,6 +314,17 @@ def audit_dependencies(
     known_optional = known_optional or []
     imports = scan_imports(project_path)
 
+    # Build a file contents cache once for safety checks (avoids re-walking filesystem per-dep)
+    file_contents_cache: dict[str, str] = {}
+    for file_path_list in imports.values():
+        for file_path, _ in file_path_list:
+            if file_path not in file_contents_cache:
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        file_contents_cache[file_path] = f.read()
+                except (OSError, UnicodeDecodeError):
+                    file_contents_cache[file_path] = ""
+
     is_re_audit = False
     resolved_count = 0
     acknowledged_count = 0
@@ -324,7 +340,7 @@ def audit_dependencies(
     unused: list[UsageResult] = []
     missing: list[tuple[str, list[str]]] = []
 
-    dep_names_normalized = {_normalize_package_name(_extract_package_name(d)) for d in dependencies}
+    dep_names_normalized = {_normalize_package_name(extract_package_name(d)) for d in dependencies}
     for alias, real in PACKAGE_ALIASES.items():
         if _normalize_package_name(real) in dep_names_normalized:
             dep_names_normalized.add(_normalize_package_name(alias))
@@ -333,7 +349,7 @@ def audit_dependencies(
         dep_names_normalized.add(_normalize_package_name(project_name))
 
     for dep in dependencies:
-        pkg_name = _extract_package_name(dep)
+        pkg_name = extract_package_name(dep)
         pkg_normalized = _normalize_package_name(pkg_name)
 
         import_lines = []
@@ -355,7 +371,7 @@ def audit_dependencies(
 
         if not is_used:
             confidence, safety_types = _check_dependency_safety(
-                project_path, pkg_name, pkg_normalized
+                file_contents_cache, pkg_name, pkg_normalized, project_path
             )
             if safety_types and safety_types != ["static import only"]:
                 is_used = True
@@ -364,7 +380,7 @@ def audit_dependencies(
                     confidence = "medium"
         else:
             confidence, _ = _check_dependency_safety(
-                project_path, pkg_name, pkg_normalized
+                file_contents_cache, pkg_name, pkg_normalized, project_path
             )
 
         result = UsageResult(
@@ -444,12 +460,6 @@ def audit_dependencies(
         acknowledged_count=acknowledged_count,
         is_re_audit=is_re_audit,
     )
-
-
-def _extract_package_name(dependency_string: str) -> str:
-    """Extract package name from dependency string."""
-    name = dependency_string.split(">")[0].split("<")[0].split("=")[0].split("!")[0].split("[")[0].split(";")[0]
-    return name.strip()
 
 
 def generate_audit_report(result: AuditResult) -> str:
@@ -534,9 +544,20 @@ def remove_unused_dependencies(
         safe_deps = set()
         imports = scan_imports(project_path)
 
+        # Build file contents cache for safety checks
+        file_cache: dict[str, str] = {}
+        for file_path_list in imports.values():
+            for file_path, _ in file_path_list:
+                if file_path not in file_cache:
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            file_cache[file_path] = f.read()
+                    except (OSError, UnicodeDecodeError):
+                        file_cache[file_path] = ""
+
         for dep in unused_dependencies:
             pkg_normalized = _normalize_package_name(dep)
-            confidence, _ = _check_dependency_safety(project_path, dep, pkg_normalized)
+            confidence, _ = _check_dependency_safety(file_cache, dep, pkg_normalized, project_path)
             if confidence == "high":
                 safe_deps.add(dep)
             else:
@@ -642,7 +663,7 @@ def _remove_from_requirements(content: str, package_name: str) -> str:
             continue
 
         dep_normalized = _normalize_package_name(package_name)
-        line_name = _normalize_package_name(_extract_package_name(line))
+        line_name = _normalize_package_name(extract_package_name(line))
 
         if line_name == dep_normalized or line_name == package_name.replace("_", "-"):
             continue

@@ -2,11 +2,18 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 from dataclasses import dataclass
 from typing import Optional
 
+from ..utils.dep_utils import extract_package_name
+
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "replace_dependency",
+    "restore_backup",
+    "ReplacementResult",
+]
 
 
 @dataclass
@@ -35,7 +42,7 @@ def replace_dependency(
     Returns:
         A ReplacementResult indicating success or failure.
     """
-    package_name = _extract_package_name(old_dep)
+    package_name = extract_package_name(old_dep)
     old_pattern = _create_dependency_pattern(package_name)
 
     files_modified = []
@@ -104,7 +111,7 @@ def _replace_in_file(
 
 def _replace_in_python(content: str, old_pattern: str, old_dep: str, new_dep: str) -> str:
     """Replace in setup.py style files."""
-    new_dep_name = _extract_package_name(new_dep)
+    new_dep_name = extract_package_name(new_dep)
     new_content = re.sub(old_pattern, f"'{new_dep}'", content)
     new_content = re.sub(rf"(?i){re.escape(new_dep_name)}", lambda m: m.group(0), new_content)
     return new_content
@@ -112,25 +119,35 @@ def _replace_in_python(content: str, old_pattern: str, old_dep: str, new_dep: st
 
 def _replace_in_toml(content: str, old_dep: str, new_dep: str) -> str:
     """Replace in pyproject.toml or Pipfile."""
-    old_name = _extract_package_name(old_dep)
-    new_name = _extract_package_name(new_dep)
+    old_name = extract_package_name(old_dep)
 
-    new_content = content
-    new_content = re.sub(rf'["\']?{re.escape(old_name)}.*?["\']', f'"{new_dep}"', new_content)
+    escaped = re.escape(old_name)
+
+    # Case 1: quoted package name with version specifier (array or key format)
+    # Matches: "old<=1.0", "old>=1.0,<2.0", old>=1.0, etc.
+    pattern1 = rf'["\']{escaped}([=<>!~]+[^\s"\']*)["\']'
+    new_content = re.sub(pattern1, rf'"{new_dep}\1"', content, flags=re.IGNORECASE)
+
+    # Case 2: bare package name on array entry lines (e.g., "old" without version)
+    pattern2 = rf'^(\s*["\']){escaped}(["\']?\s*[,]?\s*)$'
+    new_content = re.sub(
+        pattern2, rf'\1{new_dep}\2', new_content, flags=re.MULTILINE | re.IGNORECASE
+    )
+
+    # Case 3: package= "..." style (e.g., old = ">=1.0")
+    pattern3 = rf'^(\s*){escaped}(\s*=\s*["\'][^"\']*["\'])$'
+    new_content = re.sub(
+        pattern3, rf'\1{new_dep}\2', new_content, flags=re.MULTILINE | re.IGNORECASE
+    )
+
     return new_content
 
 
 def _replace_in_text(content: str, old_dep: str, new_dep: str) -> str:
     """Replace in requirements.txt or setup.cfg."""
-    old_name = _extract_package_name(old_dep)
+    old_name = extract_package_name(old_dep)
     new_content = re.sub(rf'^{re.escape(old_name)}.*$', new_dep, content, flags=re.MULTILINE)
     return new_content
-
-
-def _extract_package_name(dependency_string: str) -> str:
-    """Extract just the package name from a dependency string."""
-    parts = dependency_string.split('>', 1)[0].split('<', 1)[0].split('=', 1)[0].split('!', 1)[0].split('[', 1)[0]
-    return parts.strip()
 
 
 def _create_dependency_pattern(package_name: str) -> str:
