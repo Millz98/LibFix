@@ -42,16 +42,12 @@ class DependencyFetcherThread(QThread):
     def __init__(self, dependencies: list[str]) -> None:
         super().__init__()
         self.dependencies = dependencies
-        self._stopped = False
-
-    def stop(self) -> None:
-        self._stopped = True
 
     def run(self) -> None:
         deps_with_info: dict[str, Optional[dict]] = {}
         total = len(self.dependencies)
         for i, dep in enumerate(self.dependencies):
-            if self._stopped:
+            if self.isInterruptionRequested():
                 break
             package_name = extract_package_name(dep)
             info = get_package_info_from_pypi(package_name)
@@ -69,9 +65,6 @@ class ReplacementThread(QThread):
         self.project_path = project_path
         self.old_dep = old_dep
         self.new_dep = new_dep
-
-    def stop(self) -> None:
-        pass
 
     def run(self) -> None:
         from .core.dependency_replacer import replace_dependency
@@ -530,10 +523,15 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, a0) -> None:
         if self.fetcher_thread and self.fetcher_thread.isRunning():
-            self.fetcher_thread.stop()
-            self.fetcher_thread.wait(5000)
+            self.fetcher_thread.requestInterruption()
+            if not self.fetcher_thread.wait(3000):
+                self.fetcher_thread.terminate()
+                self.fetcher_thread.wait()
         if self.replacement_thread and self.replacement_thread.isRunning():
-            self.replacement_thread.wait(5000)
+            self.replacement_thread.requestInterruption()
+            if not self.replacement_thread.wait(3000):
+                self.replacement_thread.terminate()
+                self.replacement_thread.wait()
         a0.accept()
 
     def select_project_directory(self) -> None:
