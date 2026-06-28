@@ -169,7 +169,7 @@ Examples:
 
     if args.command == 'gui' or args.command is None:
         from .main import main as launch_gui
-        launch_gui(args.project)
+        launch_gui(getattr(args, 'project', '.'))
         return 0
 
     if args.command == 'audit':
