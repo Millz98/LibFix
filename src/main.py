@@ -3,7 +3,8 @@ import os
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QSortFilterProxyModel, QTimer
+from PyQt6.QtGui import QColor, QFont, QAction
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -21,6 +22,15 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QTextEdit,
     QInputDialog,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QSplitter,
+    QGroupBox,
+    QStatusBar,
+    QToolBar,
+    QAbstractItemView,
+    QMenu,
 )
 import qdarkstyle
 
@@ -454,72 +464,171 @@ class MainWindow(QMainWindow):
     def __init__(self, initial_project: Optional[str] = None) -> None:
         super().__init__()
         self.setWindowTitle("LibFix - Python Dependency Analyzer")
-        self.setGeometry(100, 100, 800, 600)
-
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-
-        self.layout = QVBoxLayout()
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        header_layout = QHBoxLayout()
-        self.select_button = QPushButton("Select Python Project")
-        self.select_button.clicked.connect(self.select_project_directory)
-        header_layout.addWidget(self.select_button)
-
-        self.audit_button = QPushButton("Audit Usage")
-        self.audit_button.clicked.connect(self.audit_dependencies)
-        self.audit_button.setEnabled(False)
-        header_layout.addWidget(self.audit_button)
-
-        self.replace_button = QPushButton("Replace Selected")
-        self.replace_button.clicked.connect(self.replace_selected)
-        self.replace_button.setEnabled(False)
-        header_layout.addWidget(self.replace_button)
-        self.layout.addLayout(header_layout)
-
-        self.project_label = QLabel("No project selected")
-        self.project_label.setStyleSheet("QLabel { font-size: 14px; color: #888; margin-top: 10px; }")
-        self.project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(self.project_label)
-
-        self.stats_layout = QHBoxLayout()
-        self.total_deps_label = QLabel("Dependencies: -")
-        self.inactive_deps_label = QLabel("Inactive: -")
-        self.stats_layout.addWidget(self.total_deps_label)
-        self.stats_layout.addStretch()
-        self.stats_layout.addWidget(self.inactive_deps_label)
-        self.layout.addLayout(self.stats_layout)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.layout.addWidget(self.progress_bar)
-
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("QLabel { color: #888; font-size: 12px; }")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(self.status_label)
-
-        self.dependency_list_widget = QListWidget()
-        self.dependency_list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.dependency_list_widget.itemClicked.connect(self.on_item_clicked)
-        self.layout.addWidget(self.dependency_list_widget)
-
-        self.central_widget.setLayout(self.layout)
+        self.setGeometry(100, 100, 1100, 700)
+        self.setMinimumSize(850, 550)
 
         self.project_directory: Optional[str] = None
         self.fetcher_thread: Optional[DependencyFetcherThread] = None
         self.replacement_thread: Optional[ReplacementThread] = None
         self.selected_item_data: Optional[tuple] = None
+        self._dep_data: list[dict] = []
+
+        self._setup_ui()
+        self._setup_toolbar()
+        self._setup_statusbar()
 
         if initial_project:
             self.project_directory = initial_project
             self.project_label.setText(f"Selected: {self.project_directory}")
-            self.find_and_parse_dependencies()
+            self.project_label.setStyleSheet("QLabel { color: #6a9955; font-size: 12px; padding: 2px 8px; }")
+            QTimer.singleShot(100, self.find_and_parse_dependencies)
         self.python_interpreter_path = get_python_interpreter_path()
         self.dependencies_with_info: dict[str, Optional[dict]] = {}
 
         logger.info(f"LibFix started with Python: {self.python_interpreter_path}")
+
+    def _setup_ui(self) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Header bar
+        header = QWidget()
+        header.setStyleSheet("QWidget { background: #2b2b2b; border-bottom: 1px solid #3c3c3c; }")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 8, 12, 8)
+
+        self.select_button = QPushButton("  Select Project")
+        self.select_button.setStyleSheet(self._btn_style("#5a9ead"))
+        self.select_button.clicked.connect(self.select_project_directory)
+        header_layout.addWidget(self.select_button)
+
+        self.audit_button = QPushButton("  Audit Usage")
+        self.audit_button.setStyleSheet(self._btn_style("#7b6896"))
+        self.audit_button.clicked.connect(self.audit_dependencies)
+        self.audit_button.setEnabled(False)
+        header_layout.addWidget(self.audit_button)
+
+        self.replace_button = QPushButton("  Replace Selected")
+        self.replace_button.setStyleSheet(self._btn_style("#c07b5a"))
+        self.replace_button.clicked.connect(self.replace_selected)
+        self.replace_button.setEnabled(False)
+        header_layout.addWidget(self.replace_button)
+
+        header_layout.addStretch()
+
+        self.project_label = QLabel("No project selected")
+        self.project_label.setStyleSheet("QLabel { color: #888; font-size: 12px; padding: 2px 8px; }")
+        header_layout.addWidget(self.project_label)
+
+        main_layout.addWidget(header)
+
+        # Content area with splitter
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Table area
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(8, 4, 8, 4)
+        table_layout.setSpacing(4)
+
+        # Stats row
+        stats_row = QHBoxLayout()
+        self.total_deps_label = QLabel("Dependencies: -")
+        self.total_deps_label.setStyleSheet("QLabel { font-size: 13px; font-weight: bold; }")
+        stats_row.addWidget(self.total_deps_label)
+
+        self.inactive_deps_label = QLabel("Inactive: -")
+        self.inactive_deps_label.setStyleSheet("QLabel { font-size: 13px; font-weight: bold; color: #e06c75; }")
+        stats_row.addWidget(self.inactive_deps_label)
+        stats_row.addStretch()
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMaximumHeight(20)
+        self.progress_bar.setStyleSheet("QProgressBar { border-radius: 3px; } QProgressBar::chunk { background: #5a9ead; border-radius: 3px; }")
+        stats_row.addWidget(self.progress_bar)
+        stats_row.setStretchFactor(self.progress_bar, 1)
+
+        table_layout.addLayout(stats_row)
+
+        # Table
+        self.dep_table = QTableWidget()
+        self.dep_table.setColumnCount(4)
+        self.dep_table.setHorizontalHeaderLabels(["Package", "Required", "Latest", "Status"])
+        self.dep_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.dep_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.dep_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.dep_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.dep_table.horizontalHeader().resizeSection(1, 120)
+        self.dep_table.horizontalHeader().resizeSection(2, 100)
+        self.dep_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.dep_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.dep_table.setAlternatingRowColors(True)
+        self.dep_table.setStyleSheet(
+            "QTableWidget { border: none; gridline-color: #333; } "
+            "QTableWidget::item { padding: 4px; } "
+            "QTableWidget::item:selected { background: #3a3a5a; } "
+            "QHeaderView::section { background: #2b2b2b; padding: 6px; border: none; border-bottom: 2px solid #5a9ead; font-weight: bold; }"
+        )
+        self.dep_table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.dep_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.dep_table.customContextMenuRequested.connect(self._on_table_context_menu)
+        table_layout.addWidget(self.dep_table)
+
+        splitter.addWidget(table_container)
+
+        # Details panel
+        details_group = QGroupBox("Details")
+        details_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #444; border-radius: 4px; margin-top: 4px; padding-top: 12px; } "
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+        )
+        details_layout = QVBoxLayout(details_group)
+        self.details_text = QTextEdit()
+        self.details_text.setReadOnly(True)
+        self.details_text.setMaximumHeight(150)
+        self.details_text.setStyleSheet(
+            "QTextEdit { border: none; background: transparent; font-size: 12px; }"
+        )
+        details_layout.addWidget(self.details_text)
+        splitter.addWidget(details_group)
+        splitter.setSizes([500, 150])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+
+        main_layout.addWidget(splitter)
+
+        # Status bar at bottom
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("QLabel { color: #888; font-size: 11px; padding: 2px 8px; }")
+        main_layout.addWidget(self.status_label)
+
+    def _setup_toolbar(self) -> None:
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setStyleSheet(
+            "QToolBar { spacing: 4px; padding: 2px 8px; border-bottom: 1px solid #3c3c3c; } "
+            "QToolButton { padding: 4px 8px; border-radius: 3px; } "
+            "QToolButton:hover { background: #3a3a3a; }"
+        )
+        self.addToolBar(toolbar)
+
+    def _setup_statusbar(self) -> None:
+        self.statusBar().showMessage("Ready")
+        self.statusBar().setStyleSheet("QStatusBar { border-top: 1px solid #3c3c3c; }")
+
+    @staticmethod
+    def _btn_style(color: str) -> str:
+        return (
+            f"QPushButton {{ background: {color}; color: #fff; border: none; padding: 6px 14px; "
+            f"border-radius: 4px; font-size: 12px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {color}cc; }}"
+            f"QPushButton:pressed {{ background: {color}99; }}"
+            f"QPushButton:disabled {{ background: #444; color: #666; }}"
+        )
 
     def closeEvent(self, a0) -> None:
         if self.fetcher_thread and self.fetcher_thread.isRunning():
@@ -539,12 +648,14 @@ class MainWindow(QMainWindow):
         if directory:
             self.project_directory = directory
             self.project_label.setText(f"Selected: {self.project_directory}")
+            self.project_label.setStyleSheet("QLabel { color: #6a9955; font-size: 12px; padding: 2px 8px; }")
+            self.statusBar().showMessage(f"Project: {directory}")
             logger.info(f"Selected project: {self.project_directory}")
             self.find_and_parse_dependencies()
 
     def find_and_parse_dependencies(self) -> None:
         if self.project_directory:
-            self.dependency_list_widget.clear()
+            self.dep_table.setRowCount(0)
             self.status_label.setText("Scanning for dependency files...")
             self.total_deps_label.setText("Dependencies: -")
             self.inactive_deps_label.setText("Inactive: -")
@@ -572,7 +683,7 @@ class MainWindow(QMainWindow):
                 self.fetcher_thread.start()
             else:
                 self.status_label.setText("No dependencies found")
-                self.dependency_list_widget.addItem("No dependencies found in this project.")
+                self.statusBar().showMessage("No dependencies found in this project.")
 
     def _on_progress(self, current: int, total: int) -> None:
         self.progress_bar.setValue(int((current / total) * 100))
@@ -585,15 +696,63 @@ class MainWindow(QMainWindow):
         self.audit_button.setEnabled(True)
         self._update_dependency_list_with_info()
 
-    def on_item_clicked(self, item: QListWidget.item) -> None:
+    def _on_selection_changed(self) -> None:
         self.replace_button.setEnabled(False)
         self.selected_item_data = None
+        selected = self.dep_table.selectedItems()
+        if not selected:
+            self.details_text.setPlainText("")
+            return
 
-        for dep, (inactive, alts) in self._get_inactive_deps().items():
-            if dep in item.text() and alts:
+        row = selected[0].row()
+        if row < len(self._dep_data):
+            entry = self._dep_data[row]
+            dep = entry["dep"]
+            alts = entry["alts"]
+            inactive = entry["inactive"]
+            reason = entry["reason"]
+            version = entry["version"]
+
+            if inactive and alts:
                 self.selected_item_data = (dep, alts)
                 self.replace_button.setEnabled(True)
-                break
+
+            # Update details panel
+            details = f"<b>{dep}</b><br>"
+            details += f"Required: {entry['required'] or 'N/A'}<br>"
+            details += f"Latest: {version}<br>"
+            if inactive:
+                details += f"<span style='color:#e06c75;'>Status: INACTIVE</span><br>"
+                details += f"Reason: {reason}<br>"
+                if alts:
+                    details += f"<br><b>Alternatives:</b><br>"
+                    for alt in alts:
+                        details += f" &bull; {alt}<br>"
+            elif entry.get("info"):
+                details += f"<span style='color:#6a9955;'>Status: Active</span><br>"
+            else:
+                details += f"<span style='color:#e5c07b;'>Status: Unknown</span><br>"
+            self.details_text.setHtml(details)
+
+    def _on_table_context_menu(self, pos) -> None:
+        row = self.dep_table.rowAt(pos.y())
+        if row < 0:
+            return
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy Package Name")
+        ignore_action = menu.addAction("Ignore This Package")
+        action = menu.exec(self.dep_table.mapToGlobal(pos))
+        if action == copy_action:
+            dep = self._dep_table_item_text(row)
+            QApplication.clipboard().setText(dep)
+        elif action == ignore_action:
+            pass  # placeholder for future ignore feature
+
+    def _dep_table_item_text(self, row: int) -> str:
+        item = self.dep_table.item(row, 0)
+        if item:
+            return item.text()
+        return ""
 
     def _get_inactive_deps(self) -> dict[str, tuple[bool, list[str]]]:
         inactive_deps: dict[str, tuple[bool, list[str]]] = {}
@@ -615,13 +774,13 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _update_dependency_list_with_info(self) -> None:
-        self.dependency_list_widget.clear()
+        self.dep_table.setRowCount(0)
+        self._dep_data.clear()
         inactive_count = 0
-        inactive_items = []
-        active_items = []
 
         for dep, info in self.dependencies_with_info.items():
             latest_version = "N/A"
+            required_version = ""
             inactive = False
             reason = ""
             alternatives: list[str] = []
@@ -632,26 +791,55 @@ class MainWindow(QMainWindow):
                 latest_version = info['info']['version']
                 inactive, reason, alternatives = is_potentially_inactive(info, package_name)
 
-            item_text = f"{dep} (Latest: {latest_version})"
+            # Extract required version from dep string
+            for op in ['>=', '<=', '==', '!=', '~=', '>', '<']:
+                if op in dep:
+                    required_version = dep.split(op)[-1].strip().rstrip(']').rstrip("'").rstrip('"')
+                    break
+
             if inactive:
                 inactive_count += 1
-                item_text += " [INACTIVE]"
-                if reason:
-                    item_text += f" - {reason}"
-                if alternatives:
-                    item_text += f" (Try: {', '.join(alternatives)})"
-                inactive_items.append((item_text, dep, alternatives))
-            elif info:
-                active_items.append((item_text, dep, []))
 
-        inactive_items.sort(key=lambda x: x[0])
-        active_items.sort(key=lambda x: x[0])
+            self._dep_data.append({
+                "dep": dep,
+                "required": required_version,
+                "version": latest_version,
+                "inactive": inactive,
+                "reason": reason,
+                "alts": alternatives,
+                "info": info,
+            })
 
-        for item_text, _, _ in inactive_items + active_items:
-            self.dependency_list_widget.addItem(item_text)
+        # Sort: inactive first, then alphabetically
+        self._dep_data.sort(key=lambda x: (not x["inactive"], x["dep"].lower()))
 
+        for i, entry in enumerate(self._dep_data):
+            self.dep_table.insertRow(i)
+            # Package column (clean name)
+            pkg_name = extract_package_name(entry["dep"])
+            self.dep_table.setItem(i, 0, QTableWidgetItem(pkg_name))
+            self.dep_table.setItem(i, 1, QTableWidgetItem(entry["required"]))
+            self.dep_table.setItem(i, 2, QTableWidgetItem(entry["version"]))
+
+            # Status column
+            if entry["inactive"]:
+                status_item = QTableWidgetItem("INACTIVE")
+                status_item.setForeground(QColor("#e06c75"))
+                font = status_item.font()
+                font.setBold(True)
+                status_item.setFont(font)
+            elif entry.get("info"):
+                status_item = QTableWidgetItem("Active")
+                status_item.setForeground(QColor("#6a9955"))
+            else:
+                status_item = QTableWidgetItem("Unknown")
+                status_item.setForeground(QColor("#e5c07b"))
+            self.dep_table.setItem(i, 3, status_item)
+
+        self.total_deps_label.setText(f"Dependencies: {len(self._dep_data)}")
         self.inactive_deps_label.setText(f"Inactive: {inactive_count}")
         self.status_label.setText("Analysis complete" if self.dependencies_with_info else "")
+        self.statusBar().showMessage(f"Analysis complete — {len(self._dep_data)} packages, {inactive_count} inactive")
 
     def replace_selected(self) -> None:
         if not self.selected_item_data or not self.project_directory:
@@ -682,7 +870,6 @@ class MainWindow(QMainWindow):
         self.replacement_thread.start()
 
     def _on_replacement_progress(self, message: str, success: bool) -> None:
-        self.status_label.setText(message)
         prefix = "✓ " if success else "✗ "
         self.status_label.setText(prefix + message)
 
