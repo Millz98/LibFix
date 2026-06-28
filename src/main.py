@@ -449,7 +449,7 @@ class MigrationGuideDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, initial_project: Optional[str] = None) -> None:
         super().__init__()
         self.setWindowTitle("LibFix - Python Dependency Analyzer")
         self.setGeometry(100, 100, 800, 600)
@@ -506,6 +506,11 @@ class MainWindow(QMainWindow):
         self.central_widget.setLayout(self.layout)
 
         self.project_directory: Optional[str] = None
+
+        if initial_project:
+            self.project_directory = initial_project
+            self.project_label.setText(f"Selected: {self.project_directory}")
+            self.find_and_parse_dependencies()
         self.python_interpreter_path = get_python_interpreter_path()
         self.dependencies_with_info: dict[str, Optional[dict]] = {}
         self.fetcher_thread: Optional[DependencyFetcherThread] = None
@@ -711,14 +716,14 @@ class MainWindow(QMainWindow):
                 self.status_label.setText("")
 
 
-def main() -> None:
+def main(initial_project: Optional[str] = None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(levelname)s: %(message)s"
     )
     app = QApplication(sys.argv)
     app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='PyQt6'))
-    window = MainWindow()
+    window = MainWindow(initial_project=initial_project)
     window.show()
     sys.exit(app.exec())
 

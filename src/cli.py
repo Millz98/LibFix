@@ -115,6 +115,8 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  libfix gui
+  libfix gui /path/to/project
   libfix analyze /path/to/project
   libfix analyze . --output json
   libfix analyze . --show-all --output compact
@@ -144,6 +146,9 @@ Examples:
     cache_parser = subparsers.add_parser('cache', help='Manage cache')
     cache_parser.add_argument('action', choices=['clear', 'info'], help='Cache action')
 
+    gui_parser = subparsers.add_parser('gui', help='Launch the graphical interface')
+    gui_parser.add_argument('project', nargs='?', default='.', help='Project directory (default: .)')
+
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
 
     args = parser.parse_args()
@@ -161,6 +166,11 @@ Examples:
             print(f"Cache directory: {cache.cache_dir}")
             print(f"Cached packages: {len(cache_files)}")
             return 0
+
+    if args.command == 'gui' or args.command is None:
+        from .main import main as launch_gui
+        launch_gui(args.project)
+        return 0
 
     if args.command == 'audit':
         project_path = args.project
@@ -200,11 +210,8 @@ Examples:
             print(generate_audit_report(audit_result))
         return 0
 
-    if args.command == 'analyze' or args.command is None:
-        if args.command is None:
-            project_path = args.project if len(sys.argv) > 1 else '.'
-        else:
-            project_path = args.project
+    if args.command == 'analyze':
+        project_path = args.project
 
         results = analyze_project(
             project_path,
