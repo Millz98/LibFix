@@ -41,6 +41,7 @@ from .core.pypi_utils import get_package_info_from_pypi
 from .core.dependency_analyzer import is_potentially_inactive
 from .core.dependency_replacer import replace_dependency
 from .utils.dep_utils import extract_package_name
+from .core.audit_history import load_audit_history
 
 logger = logging.getLogger(__name__)
 
@@ -736,15 +737,26 @@ class MainWindow(QMainWindow):
         row = self.dep_table.rowAt(pos.y())
         if row < 0:
             return
+        if row >= len(self._dep_data):
+            return
+        entry = self._dep_data[row]
+        pkg_name = extract_package_name(entry["dep"])
+
         menu = QMenu(self)
         copy_action = menu.addAction("Copy Package Name")
-        ignore_action = menu.addAction("Ignore This Package")
+        menu.addSeparator()
+        if entry["inactive"]:
+            acknowledge_action = menu.addAction("Acknowledge (ignore this warning)")
+        else:
+            acknowledge_action = None
+
         action = menu.exec(self.dep_table.mapToGlobal(pos))
         if action == copy_action:
-            dep = self._dep_table_item_text(row)
-            QApplication.clipboard().setText(dep)
-        elif action == ignore_action:
-            pass  # placeholder for future ignore feature
+            QApplication.clipboard().setText(pkg_name)
+        elif acknowledge_action and action == acknowledge_action and self.project_directory:
+            history_manager = load_audit_history(self.project_directory)
+            history_manager.acknowledge(pkg_name, "inactive", "")
+            self.find_and_parse_dependencies()
 
     def _dep_table_item_text(self, row: int) -> str:
         item = self.dep_table.item(row, 0)
@@ -770,6 +782,17 @@ class MainWindow(QMainWindow):
         deps = list(self.dependencies_with_info.keys())
         dialog = AuditDialog(self, self.project_directory, deps)
         dialog.exec()
+
+    def _is_dep_handled(self, history_manager, pkg_name: str) -> bool:
+        """Check if a dep has been resolved or acknowledged under any issue type."""
+        normalized = pkg_name.lower().replace("-", "_")
+        for entry in history_manager.history.resolved:
+            if entry["package_name"].lower().replace("-", "_") == normalized:
+                return True
+        for entry in history_manager.history.acknowledged:
+            if entry["package_name"].lower().replace("-", "_") == normalized:
+                return True
+        return False
 
     def _update_dependency_list_with_info(self) -> None:
         self.dep_table.setRowCount(0)
@@ -834,10 +857,22 @@ class MainWindow(QMainWindow):
                 status_item.setForeground(QColor("#e5c07b"))
             self.dep_table.setItem(i, 3, status_item)
 
+        # Load audit history for this project and filter resolved/acknowledged
+        if self.project_directory:
+            history_manager = load_audit_history(self.project_directory)
+            history_manager.load()
+            self._dep_data = [
+                entry for entry in self._dep_data
+                if not self._is_dep_handled(history_manager, extract_package_name(entry["dep"]))
+            ]
+            inactive_count = sum(1 for e in self._dep_data if e["inactive"])
+
         self.total_deps_label.setText(f"Dependencies: {len(self._dep_data)}")
         self.inactive_deps_label.setText(f"Inactive: {inactive_count}")
         self.status_label.setText("Analysis complete" if self.dependencies_with_info else "")
-        self.statusBar().showMessage(f"Analysis complete — {len(self._dep_data)} packages, {inactive_count} inactive")
+        self.statusBar().showMessage(
+            f"Analysis complete — {len(self._dep_data)} packages, {inactive_count} inactive"
+        )
 
     def replace_selected(self) -> None:
         if not self.selected_item_data or not self.project_directory:
@@ -878,6 +913,13 @@ class MainWindow(QMainWindow):
         selected_new = getattr(self, '_selected_replacement', None)
         old_dep = self.selected_item_data[0] if self.selected_item_data else ""
 
+        # Mark the replaced dep as resolved in history
+        if old_dep and self.project_directory:
+            old_name = extract_package_name(old_dep)
+            history_manager = load_audit_history(self.project_directory)
+            action = f"replaced_with_{extract_package_name(selected_new)}" if selected_new else "replaced"
+            history_manager.mark_resolved(old_name, "inactive", action, [])
+
         should_rescan = False
 
         if selected_new and old_dep and self.project_directory:
@@ -891,8 +933,6 @@ class MainWindow(QMainWindow):
                     should_rescan = True
             except Exception as e:
                 logger.error(f"Error showing migration guide: {e}")
-
-        if should_rescan:
             reply = QMessageBox.question(
                 self,
                 "Imports Updated",
