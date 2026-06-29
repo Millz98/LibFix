@@ -717,7 +717,25 @@ class MainWindow(QMainWindow):
                 self.replace_button.setEnabled(True)
 
             # Update details panel
-            details = f"<b>{dep}</b><br>"
+            pkg_name = extract_package_name(dep)
+            details = f"<b>{pkg_name}</b><br>"
+
+            # Show learned category/ecosystem
+            try:
+                from .core.knowledge import get_knowledge_manager
+                km = get_knowledge_manager()
+                cat = km.get_category(pkg_name)
+                eco = km.get_ecosystem(pkg_name)
+                summary = km.get_summary(pkg_name)
+                if cat and cat != "unknown":
+                    details += f"Category: {cat}<br>"
+                if eco and eco != "general":
+                    details += f"Ecosystem: {eco}<br>"
+                if summary:
+                    details += f"<i>{summary}</i><br>"
+            except Exception:
+                pass
+
             details += f"Required: {entry['required'] or 'N/A'}<br>"
             details += f"Latest: {version}<br>"
             if inactive:
@@ -894,6 +912,15 @@ class MainWindow(QMainWindow):
                     if not self._is_dep_handled(history_manager, extract_package_name(entry["dep"]))
                 ]
                 inactive_count = sum(1 for e in self._dep_data if e["inactive"])
+
+        # Learn co-occurrence patterns from this project's packages
+        if self.dependencies_with_info and self.project_directory:
+            all_pkgs = [extract_package_name(d) for d in self.dependencies_with_info]
+            try:
+                from .core.knowledge import record_project_packages
+                record_project_packages(all_pkgs)
+            except Exception:
+                pass
 
         self.total_deps_label.setText(f"Dependencies: {len(self._dep_data)}")
         self.inactive_deps_label.setText(f"Inactive: {inactive_count}")

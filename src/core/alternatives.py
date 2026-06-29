@@ -53,9 +53,14 @@ COMMON_REPLACEMENTS: dict[str, list[str]] = {
 def find_alternatives(package_name: str, package_info: Optional[dict] = None) -> list[str]:
     """Find alternative packages for a given package.
 
+    Uses multiple sources in priority order:
+    1. Hardcoded COMMON_REPLACEMENTS (curated, most reliable)
+    2. Persistent knowledge system (learned from PyPI metadata)
+    3. Dynamic PyPI search (keyword-based)
+
     Args:
         package_name: The package to find alternatives for.
-        package_info: Optional PyPI package info for context.
+        package_info: Optional PyPI package info dict for learning.
 
     Returns:
         A list of alternative package names.
@@ -65,14 +70,38 @@ def find_alternatives(package_name: str, package_info: Optional[dict] = None) ->
 
     alternatives = []
 
-    if package_name in COMMON_REPLACEMENTS:
-        alternatives = COMMON_REPLACEMENTS[package_name].copy()
-        logger.debug(f"Found common replacement for {package_name}: {alternatives}")
+    # 1. Check hardcoded replacements first
+    lookup_key = package_name.lower().replace("-", "_")
+    for key, val in COMMON_REPLACEMENTS.items():
+        if key.lower().replace("-", "_") == lookup_key:
+            alternatives = val.copy()
+            break
 
+    # 2. Learn from PyPI data if available
+    if package_info:
+        try:
+            from .knowledge import learn_from_pypi, get_package_alternatives
+            knowledge = learn_from_pypi(package_name, package_info)
+            learned_alts = get_package_alternatives(package_name)
+            for alt in learned_alts:
+                if alt.lower().replace("-", "_") != lookup_key and alt not in alternatives:
+                    alternatives.append(alt)
+        except Exception:
+            pass
+
+    # 3. Fallback: search PyPI dynamically
     if not alternatives and package_info:
         alternatives = _search_pypi_related(package_name, package_info)
 
-    ALTERNATIVES_CACHE[package_name] = alternatives
+    # 4. Final fallback: knowledge system only (no PyPI data)
+    if not alternatives and not package_info:
+        try:
+            from .knowledge import get_package_alternatives
+            alternatives = get_package_alternatives(package_name)
+        except Exception:
+            pass
+
+    ALTERNATIVES_CACHE[package_name.lower()] = alternatives
     return alternatives
 
 

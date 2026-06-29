@@ -35,14 +35,13 @@ def is_potentially_inactive(
     Returns:
         A tuple of (is_inactive: bool, reason: str, alternatives: list[str]).
     """
-    from src.data.inactive_packages import inactive_package_replacements
-
-    if package_name in inactive_package_replacements:
-        inactive_data = inactive_package_replacements[package_name]
-        reason = f"Known inactive package: {inactive_data.get('reason', 'No specific reason provided.')}"
-        alternatives = inactive_data.get('alternatives', [])
-        logger.debug(f"Package '{package_name}' is in inactive replacements list")
-        return True, reason, alternatives
+    # Learn about this package for future reference
+    if package_info:
+        try:
+            from .knowledge import learn_from_pypi
+            learn_from_pypi(package_name, package_info)
+        except Exception:
+            pass
 
     if not package_info or 'info' not in package_info or 'releases' not in package_info:
         return False, "Could not retrieve sufficient PyPI information.", []
@@ -101,7 +100,7 @@ def _find_alternatives_for_package(package_name: str, package_info: Optional[dic
     Returns:
         A list of alternative package names.
     """
-    from src.core.alternatives import find_alternatives
+    from .alternatives import find_alternatives
 
     try:
         alts = find_alternatives(package_name, package_info)
