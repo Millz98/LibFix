@@ -41,6 +41,7 @@ class AuditResult:
     resolved_count: int = 0
     acknowledged_count: int = 0
     is_re_audit: bool = False
+    local_modules: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
 KNOWN_STANDARD_LIB: set[str] = {
@@ -359,6 +360,7 @@ def audit_dependencies(
     dep_results: list[UsageResult] = []
     unused: list[UsageResult] = []
     missing: list[tuple[str, list[str]]] = []
+    local_modules: list[tuple[str, list[str]]] = []
 
     dep_names_normalized = {_normalize_package_name(extract_package_name(d)) for d in dependencies}
     for alias, real in PACKAGE_ALIASES.items():
@@ -430,11 +432,13 @@ def audit_dependencies(
             if alias_target in dep_names_normalized:
                 continue
 
-        # Skip local modules/packages (part of the project itself)
+        files = [line[0] for line in lines]
+
+        # Check if this is a local module/package (part of the project itself)
         if _is_local_module(project_path, imp_name):
+            local_modules.append((imp_name, files))
             continue
 
-        files = [line[0] for line in lines]
         missing.append((imp_name, files))
 
     if history_manager:
@@ -471,9 +475,13 @@ def audit_dependencies(
     else:
         unused_summary = f"{len(unused)} unused ({len(unused_safe)} safe to remove, {len(unused_uncertain)} uncertain)" if unused else "All dependencies used"
 
+    local_summary = f"{len(local_modules)} local" if local_modules else ""
     missing_summary = f"{len(missing)} missing" if missing else "No missing dependencies"
 
-    summary = f"Audit complete: {unused_summary}, {missing_summary}"
+    parts = [unused_summary, missing_summary]
+    if local_summary:
+        parts.append(local_summary)
+    summary = f"Audit complete: {', '.join(parts)}"
 
     return AuditResult(
         unused_dependencies=unused,
@@ -483,6 +491,7 @@ def audit_dependencies(
         resolved_count=resolved_count,
         acknowledged_count=acknowledged_count,
         is_re_audit=is_re_audit,
+        local_modules=local_modules,
     )
 
 
@@ -531,8 +540,17 @@ def generate_audit_report(result: AuditResult) -> str:
             if len(files) > 3:
                 lines.append(f"      ... and {len(files) - 3} more")
 
-    if not result.unused_dependencies and not result.missing_dependencies:
-        lines.append("\nAll dependencies are used and no missing dependencies!")
+    if result.local_modules:
+        lines.append(f"\nLOCAL MODULES ({len(result.local_modules)}):")
+        for pkg, files in result.local_modules:
+            lines.append(f"  {pkg}  [LOCAL]")
+            for f in files[:3]:
+                lines.append(f"      - {os.path.basename(f)}")
+            if len(files) > 3:
+                lines.append(f"      ... and {len(files) - 3} more")
+
+    if not result.unused_dependencies and not result.missing_dependencies and not result.local_modules:
+        lines.append("\nAll dependencies are used, no missing dependencies!")
 
     lines.append(f"\n{result.summary}")
 

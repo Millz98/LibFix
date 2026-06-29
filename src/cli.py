@@ -204,6 +204,10 @@ Examples:
                     {'package': pkg, 'files': files}
                     for pkg, files in audit_result.missing_dependencies
                 ],
+                'local_modules': [
+                    {'package': pkg, 'files': files}
+                    for pkg, files in audit_result.local_modules
+                ],
             }
             print(json.dumps(result_dict, indent=2))
         else:
