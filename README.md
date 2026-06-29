@@ -1,216 +1,147 @@
 # LibFix
 
-A powerful Python dependency analyzer and updater that finds inactive dependencies, suggests alternatives, automatically migrates code, audits dependency usage, and integrates new packages.
+A Python dependency analyzer that **learns** about your packages. Finds inactive dependencies, suggests alternatives, audits usage, migrates code, and gets smarter with every project you scan.
+
+## What Makes LibFix Different
+
+**LibFix learns.** Instead of relying solely on hardcoded lists, it:
+- Fetches rich metadata from PyPI (classifiers, keywords, dependencies)
+- Derives category, ecosystem, and alternatives for any package
+- Remembers what it learns across sessions (`~/.libfix/knowledge/`)
+- Tracks which packages appear together across your projects
+- Adapts to new packages without code changes
 
 ## Features
 
-- **Dependency Detection**: Scans for `requirements.txt`, `setup.py`, `setup.cfg`, `pyproject.toml`, and `Pipfile`
-- **Inactivity Analysis**: Identifies packages that haven't been updated in over 2 years
-- **Alternative Suggestions**: Recommends actively maintained replacements with built-in database
-- **Automatic Migration**: Updates both dependency files AND source code imports/function calls
-- **Usage Auditing**: Finds unused dependencies and missing imports with confidence scoring
-- **Smart Safety**: Only auto-removes dependencies it can verify are safe (high confidence)
-- **Audit History**: Tracks resolved/acknowledged issues across re-audits
-- **Full Integration**: Installs packages via pip AND adds import statements
-- **PyPI Integration**: Fetches latest versions and package information
+- **Smart Inactivity Detection**: Uses PyPI release dates + classifiers + maintenance status
+- **Dynamic Knowledge System**: Learns about ANY package — category, ecosystem, alternatives
+- **Local Module Detection**: Recognizes your own modules (won't flag them as missing)
+- **Auto-Acknowledge**: Remembers what you've already reviewed — only shows NEW issues
+- **Usage Auditing**: Finds unused deps and missing imports with confidence scoring
+- **Automatic Migration**: Updates requirements AND source code imports
+- **Full Integration**: Installs packages via pip + adds imports + updates requirements
+- **Persistent History**: Tracks resolved/acknowledged issues across re-scans
+- **Deduplication**: Same package across multiple files shows once
+- **Comprehensive Stdlib Detection**: Uses Python's own stdlib list (no false positives)
+- **CLI + GUI**: Command line or graphical interface
 - **Caching**: Local cache to speed up repeated analysis
-- **Dynamic Import Detection**: Recognizes `importlib.import_module()`, `__import__()`, and lazy imports
-- **CLI + GUI**: Use via command line or graphical interface
 
 ## Installation
 
 ```bash
-# CLI only (no GUI)
 pip install libfix
-
-# Full installation with GUI
-pip install libfix[gui]
 ```
 
 Or for development:
 ```bash
-git clone <repo-url>
+git clone https://github.com/Millz98/LibFix.git
 cd LibFix
 pip install -e ".[gui]"
 ```
 
-## Usage
+## Quick Start
 
 ### GUI
-
 ```bash
-python -m src.main
+libfix
+# or explicitly:
+libfix gui
 ```
 
-The GUI provides:
-- **Select Python Project**: Choose a project to analyze
-- **Audit Usage**: Check if dependencies are actually used in the code
-- **Replace Selected**: Replace an inactive dependency with an alternative
-- **Remove Unused Dependencies**: Safely remove unused packages (high confidence only)
-- **Add to Requirements**: Add missing packages to requirements.txt
-- **Full Integration**: Install package via pip + add import statements + update requirements
-- **Acknowledge...**: Mark issues as "will not fix" to skip them in future audits
-
 ### CLI
-
 ```bash
-# Analyze a project
+# Analyze for inactive dependencies
 libfix analyze /path/to/project
 
-# Show all packages (not just inactive)
+# Audit usage (unused/missing deps)
+libfix audit /path/to/project
+
+# Audit with JSON output
+libfix audit . --output json
+
+# Show all packages, not just inactive
 libfix analyze . --show-all
 
-# Output as JSON
-libfix analyze . --output json
-
-# Compact output
-libfix analyze . --output compact
-
-# Custom inactivity threshold (years)
+# Custom inactivity threshold
 libfix analyze . --threshold 3.0
 
-# Manage cache
+# Cache management
 libfix cache clear
 libfix cache info
 ```
 
-## Workflow
+## How It Works
 
-### Dependency Replacement
+### 1. Dependency Analysis (Inactive Detection)
+```
+libfix analyze ~/my-project
+```
+- Scans requirements.txt, setup.py, pyproject.toml, Pipfile
+- Fetches PyPI metadata for each package
+- Flags packages not updated in 2+ years (configurable)
+- Suggests alternatives from learned knowledge
+- **Auto-acknowledges** after first scan — re-scans only show NEW issues
 
-1. **Select a project** - Choose a Python project directory
-2. **Scan dependencies** - LibFix finds all dependency files
-3. **Analyze packages** - Fetches PyPI data to check for inactivity
-4. **Review results** - See inactive packages with alternative suggestions
-5. **Replace dependency** - Choose an alternative to update requirements
-6. **Auto-migrate code** - LibFix updates imports and function calls
+### 2. Usage Audit
+```
+libfix audit ~/my-project
+```
+- Finds **unused** dependencies (in requirements but not imported)
+- Finds **missing** dependencies (imported but not in requirements)
+- Identifies **local modules** (your own .py files/packages)
+- Confidence scoring: HIGH (safe to remove), MEDIUM, LOW
+- Filters out stdlib modules automatically (contextlib, asyncio, etc.)
 
-### Dependency Auditing
+### 3. Knowledge Learning
+Every scan teaches LibFix:
+- **Category**: web, database, testing, cli, data-science, etc.
+- **Ecosystem**: django, flask, fastapi, ml, etc.
+- **Alternatives**: 100+ known patterns + dynamic discovery
+- **Co-occurrence**: which packages appear together
 
-1. **Run audit** - Click "Audit Usage" to scan for unused/missing dependencies
-2. **Review findings** - See confidence levels (SAFE vs CAUTION)
-3. **Remove unused** - LibFix only removes high-confidence unused dependencies
-4. **Add missing** - Install and integrate missing packages
-5. **Acknowledge** - Skip issues you don't want to fix (they won't appear in future audits)
+Knowledge persists in `~/.libfix/knowledge/` — the more you scan, the smarter it gets.
 
-## Dependency Usage Audit
+## GUI Features
 
-LibFix audits your project to find:
+- **Table view** with columns: Package, Required, Latest, Status
+- **Details panel** showing category, ecosystem, summary, alternatives
+- **Inactive deps sorted to top** with color-coded status
+- **Right-click context menu**: copy name, acknowledge warning
+- **Colored action buttons**: Select Project, Audit, Replace
+- **Status bar** with project info and scan summary
 
-- **Unused dependencies**: Packages in requirements that aren't imported anywhere
-- **Missing dependencies**: Imports that don't have corresponding entries in requirements
+## Audit History
 
-### Confidence Scoring
+LibFix tracks state in `.libfix/audit-history.json` (per-project):
+- **Resolved**: Issues you fixed (replaced, removed, added)
+- **Acknowledged**: Issues you chose to ignore
+- **Auto-acknowledged**: Inactive deps automatically remembered after first scan
 
-LibFix assigns confidence levels to help prevent breaking your project:
+On re-scan, previously-handled issues are filtered out. Stale acknowledgments are cleaned up if a dep changes (e.g., gets a new release).
+
+## Knowledge Storage
+
+| Location | Purpose |
+|----------|---------|
+| `~/.libfix/knowledge/package-knowledge.json` | Learned package metadata |
+| `~/.libfix/knowledge/cooccurrence.json` | Package relationship patterns |
+| `~/.libfix/cache/` | PyPI API response cache |
+| `.libfix/audit-history.json` | Per-project audit history |
+
+## Confidence Scoring
 
 | Level | Meaning | Auto-remove |
 |-------|---------|-------------|
-| **HIGH** | Static imports detected, no dynamic usage | ✅ Yes |
-| **MEDIUM** | Used in tests, examples, or setup files | ❌ No |
-| **LOW** | Potentially used dynamically (`importlib`, plugins) | ❌ No |
+| **HIGH** | Static imports only, no dynamic usage | Yes |
+| **MEDIUM** | Used in tests, examples, or setup files | No |
+| **LOW** | Potentially used dynamically (importlib, plugins) | No |
 
-### Safety Features
+## Supported Package Formats
 
-- Ignores `venv`, `__pycache__`, `.git` directories
-- Recognizes package aliases (sklearn→scikit-learn, cv2→opencv-python, etc.)
-- Detects dynamic imports (`importlib.import_module()`, `__import__()`)
-- Creates `.bak` backup files before modifying
-- Filters out previously resolved/acknowledged issues
-
-### Audit History
-
-LibFix tracks actions in `.libfix/audit-history.json`:
-- **Resolved**: Issues you fixed (e.g., removed unused dependency)
-- **Acknowledged**: Issues you chose to ignore with optional reason
-
-On re-audit, previously handled issues won't appear again.
-
-## Supported Migrations
-
-LibFix can automatically migrate code for these packages:
-
-| Old Package | New Package | What Gets Updated |
-|------------|-------------|-------------------|
-| `toml` | `tomllib` | Imports, `open()` file mode, `toml.load()` |
-| `pytz` | `zoneinfo` | Imports, `timezone()`, `utc` references |
-| `python-dateutil` | `pendulum` | Imports, `parser.parse()`, `relativedelta` |
-| `seaborn` | `plotly` | Imports, `lineplot()`, `scatterplot()`, etc. |
-| `mock` | `unittest.mock` | Imports, `Mock()` → `MagicMock()` |
-| `ujson` | `orjson` | Imports, `dumps()`, `loads()` |
-| `requests` | `httpx` | Imports, `get()`, `post()`, etc. |
-| `simplejson` | `json` | Imports, `dump()`, `dumps()`, etc. |
-| `chardet` | `charset-normalizer` | Imports, `detect()` |
-
-## Full Integration
-
-The "Full Integration" button performs:
-
-1. **Install via pip** - Skips non-PyPI packages (local dependencies)
-2. **Add import statements** - Inserts proper imports into source files
-3. **Update requirements** - Adds to requirements.txt
-
-## Configuration
-
-### Custom Alternatives
-
-Add your own package replacements programmatically:
-
-```python
-from src.core.alternatives import add_replacement
-add_replacement("old-package", ["new-package-1", "new-package-2"])
-```
-
-### Extending Migration Guides
-
-Edit `src/core/migration_guide.py` to add new migration patterns:
-
-```python
-"my-package": {
-    "new": "my-new-package",
-    "import_map": {
-        "import my_package": "import my_new_package",
-    },
-    "replacements": [
-        ("my_package.func(", "my_new_package.func("),
-    ],
-    "notes": [
-        "Migration notes here",
-    ],
-}
-```
-
-### Custom Inactivity Threshold
-
-Edit `src/core/dependency_analyzer.py`:
-
-```python
-INACTIVITY_THRESHOLD_DAYS = 730  # 2 years (default)
-```
-
-## Project Structure
-
-```
-LibFix/
-├── src/
-│   ├── main.py                    # GUI application
-│   ├── cli.py                     # Command-line interface
-│   └── core/
-│       ├── dependency_finder.py      # Find dependency files
-│       ├── dependency_parser.py       # Parse various formats
-│       ├── dependency_analyzer.py     # Check for inactivity
-│       ├── dependency_replacer.py     # Update requirements files
-│       ├── dependency_auditor.py      # Audit dependency usage
-│       ├── dependency_integrator.py   # Install + add imports
-│       ├── audit_history.py           # Track resolved issues
-│       ├── pypi_utils.py              # PyPI API integration
-│       ├── cache.py                   # Local caching
-│       ├── alternatives.py            # Alternative package suggestions
-│       └── migration_guide.py         # Code migration patterns
-├── tests/                           # Unit tests (70 tests)
-├── pyproject.toml                  # Project configuration
-└── README.md
-```
+- `requirements.txt`
+- `setup.py` / `setup.cfg`
+- `pyproject.toml`
+- `Pipfile`
 
 ## Requirements
 
