@@ -1,12 +1,20 @@
 import logging
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
 from ..utils.dep_utils import extract_package_name
 
 logger = logging.getLogger(__name__)
+
+# Build comprehensive stdlib set from sys.stdlib_module_names (Python 3.10+)
+# and fallback to our manual list for older versions
+if hasattr(sys, "stdlib_module_names"):
+    _STDLIB_MODULES: frozenset[str] = frozenset(sys.stdlib_module_names)
+else:
+    _STDLIB_MODULES = frozenset()
 
 __all__ = [
     "UsageResult",
@@ -44,38 +52,21 @@ class AuditResult:
     local_modules: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
-KNOWN_STANDARD_LIB: set[str] = {
-    "os", "sys", "re", "json", "time", "datetime", "date", "timedelta",
-    "collections", "itertools", "functools", "operator", "enum", "typing",
-    "pathlib", "urllib", "http", "html", "xml", "csv", "io", "buffer",
-    "copy", "pickle", "shelve", "sqlite3", "logging", "warnings",
-    "threading", "multiprocessing", "subprocess", "socket", "ssl",
-    "email", "smtplib", "poplib", "imaplib", "uuid", "hashlib",
-    "hmac", "secrets", "base64", "binascii", "struct", "codecs",
-    "argparse", "optparse", "getopt", "configparser",
-    "platform", "sysconfig", "abc", "asyncio", "gc", "weakref",
-    "types", "inspect", "dis", "compileall", "marshal", "code",
-    "ast", "symtable", "tokenize", "keyword", "token", "linecache",
-    "random", "statistics", "math", "cmath", "decimal", "fractions",
-    "numbers", "curses", "textwrap", "string", "unicodedata", "locale",
-    "gettext", "gzip", "bz2", "lzma", "zipfile", "tarfile",
-    "shutil", "glob", "fnmatch", "tempfile", "tempdir", "fileinput",
-    "stat", "filecmp", "select", "poll", "mmap",
-    "heapq", "traceback", "unittest", "atexit", "trace",
-    "pprint", "signal", "contextvars", "dataclasses",
-    "graphlib", "pkgutil", "zipimport", "imp", "importlib",
-    "bisect", "array", "copyreg", "dbm", "msvcrt",
-    "grp", "pwd", "termios", "fcntl", "resource", "errno",
-    "exceptions", "builtins", "PrettyTable", "colorsys",
+# Comprehensive stdlib: use Python's built-in list (3.10+) plus manual extras
+# for modules that might not be in sys.stdlib_module_names
+_STDLIB_EXTRAS = {
+    "date", "timedelta",  # submodules of datetime
+    "PrettyTable", "colorsys",
     "concurrent", "concurrent.futures", "multiprocessing.pool",
-    "queue", "mimetypes", "netrc", "plistlib",
-    "sched", "ensurepip", "venv", "zipapp",
+    "tempdir",  # tempfile submodule
     "pkg_resources", "setuptools", "distutils",
     "py_compile", "compile",
     "tkinter", "Tkinter",
     "turtle", "formatter", "antigravity",
     "cgi", "cgihost", "turtledemo",
 }
+
+KNOWN_STANDARD_LIB: set[str] = set(_STDLIB_MODULES) | _STDLIB_EXTRAS
 
 PACKAGE_ALIASES: dict[str, str] = {
     "sklearn": "scikit-learn",
@@ -92,8 +83,7 @@ PACKAGE_ALIASES: dict[str, str] = {
     "sk": "scikit-learn",
     "sp": "scipy",
     "sc": "scipy",
-    "bs4": "beautifulsoup4",
-    "bs": "beautifulsoup4",
+    "dotenv": "python-dotenv",
     "yaml": "pyyaml",
     "yml": "pyyaml",
     "ftfy": "ftfy",
@@ -361,6 +351,16 @@ def audit_dependencies(
     unused: list[UsageResult] = []
     missing: list[tuple[str, list[str]]] = []
     local_modules: list[tuple[str, list[str]]] = []
+
+    # Deduplicate dependencies by normalized package name (keep first occurrence)
+    seen_normalized: set[str] = set()
+    deduped_deps: list[str] = []
+    for d in dependencies:
+        norm = _normalize_package_name(extract_package_name(d))
+        if norm not in seen_normalized:
+            seen_normalized.add(norm)
+            deduped_deps.append(d)
+    dependencies = deduped_deps
 
     dep_names_normalized = {_normalize_package_name(extract_package_name(d)) for d in dependencies}
     for alias, real in PACKAGE_ALIASES.items():
