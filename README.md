@@ -29,23 +29,36 @@ A Python dependency analyzer that **learns** about your packages. Finds inactive
 ## Installation
 
 ```bash
-pip install libfix
-```
-
-Or for development:
-```bash
 git clone https://github.com/Millz98/LibFix.git
 cd LibFix
+
+# Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install with GUI support
 pip install -e ".[gui]"
+```
+
+Or install dependencies directly:
+```bash
+pip install PyQt6 requests python-dateutil packaging qdarkstyle
 ```
 
 ## Quick Start
 
 ### GUI
 ```bash
+# Activate your venv if you created one
+source venv/bin/activate
+
+# Launch the GUI
 libfix
 # or explicitly:
 libfix gui
+
+# Open a specific project directly
+libfix gui /path/to/project
 ```
 
 ### CLI
