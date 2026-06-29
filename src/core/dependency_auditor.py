@@ -132,6 +132,26 @@ PLUGIN_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
+def _is_local_module(project_path: str, import_name: str) -> bool:
+    """Check if an import corresponds to a local module or package in the project."""
+    normalized = _normalize_package_name(import_name)
+    # Convert module path to file path (e.g., peer_discovery -> peer_discovery.py or peer_discovery/)
+    for root, dirs, files in os.walk(project_path):
+        if any(skip in root for skip in ["venv", "__pycache__", ".git", ".venv", "node_modules", ".libfix"]):
+            continue
+        # Check for a matching .py file
+        for f in files:
+            if f.endswith(".py") and _normalize_package_name(f[:-3]) == normalized:
+                return True
+        # Check for a matching package directory (contains __init__.py)
+        for d in dirs:
+            if _normalize_package_name(d) == normalized:
+                init_file = os.path.join(root, d, "__init__.py")
+                if os.path.isfile(init_file):
+                    return True
+    return False
+
+
 def scan_imports(project_path: str) -> dict[str, list[tuple[str, int]]]:
     """Scan project for all imports.
 
@@ -409,6 +429,10 @@ def audit_dependencies(
             alias_target = _normalize_package_name(PACKAGE_ALIASES[imp_normalized])
             if alias_target in dep_names_normalized:
                 continue
+
+        # Skip local modules/packages (part of the project itself)
+        if _is_local_module(project_path, imp_name):
+            continue
 
         files = [line[0] for line in lines]
         missing.append((imp_name, files))
