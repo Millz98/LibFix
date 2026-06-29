@@ -857,15 +857,43 @@ class MainWindow(QMainWindow):
                 status_item.setForeground(QColor("#e5c07b"))
             self.dep_table.setItem(i, 3, status_item)
 
-        # Load audit history for this project and filter resolved/acknowledged
+        # Auto-acknowledge inactive deps and clean up stale acknowledgments
         if self.project_directory:
             history_manager = load_audit_history(self.project_directory)
             history_manager.load()
-            self._dep_data = [
-                entry for entry in self._dep_data
-                if not self._is_dep_handled(history_manager, extract_package_name(entry["dep"]))
+
+            # Collect currently inactive package names
+            currently_inactive = {
+                extract_package_name(entry["dep"]).lower().replace("-", "_")
+                for entry in self._dep_data if entry["inactive"]
+            }
+
+            # Remove acknowledgments for deps that are no longer inactive
+            # (e.g. got a new release, or removed from project)
+            history_manager.history.acknowledged = [
+                ack for ack in history_manager.history.acknowledged
+                if ack["package_name"].lower().replace("-", "_") in currently_inactive
             ]
-            inactive_count = sum(1 for e in self._dep_data if e["inactive"])
+
+            # Auto-acknowledge all currently inactive deps for next time
+            for entry in self._dep_data:
+                if entry["inactive"]:
+                    pkg = extract_package_name(entry["dep"])
+                    history_manager.acknowledge(pkg, "inactive", "auto-acknowledged on scan")
+
+            history_manager.save()
+
+            # Filter: only show inactive deps that are new (not previously acknowledged)
+            has_prior_acknowledgments = any(
+                ack.get("issue_type") == "inactive"
+                for ack in history_manager.history.acknowledged
+            )
+            if has_prior_acknowledgments:
+                self._dep_data = [
+                    entry for entry in self._dep_data
+                    if not self._is_dep_handled(history_manager, extract_package_name(entry["dep"]))
+                ]
+                inactive_count = sum(1 for e in self._dep_data if e["inactive"])
 
         self.total_deps_label.setText(f"Dependencies: {len(self._dep_data)}")
         self.inactive_deps_label.setText(f"Inactive: {inactive_count}")
