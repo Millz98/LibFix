@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 .idea/       # If using IntelliJ/PyCharm
 *.log
+.libfix/     # Local cache and knowledge (per-user, per-machine)
